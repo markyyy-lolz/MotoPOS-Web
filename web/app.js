@@ -50,6 +50,14 @@ function niceDate(value, withTime = false) {
   });
 }
 
+function trialRemaining(expiresAt) {
+  if (!expiresAt) return null;
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return { days: 0, label: "Trial expired" };
+  const days = Math.ceil(ms / 86400000);
+  return { days, label: `${days} day${days === 1 ? "" : "s"} remaining` };
+}
+
 function statusTone(status) {
   const s = String(status || "").toLowerCase();
   if (["active","completed","paid","released","ready"].includes(s)) return "green";
@@ -169,12 +177,13 @@ function renderLanding() {
             <h1>Parts, workshop and sales.<br><span class="gradient-text">One MotoPOS Cloud.</span></h1>
             <p>Manage motorcycle parts, customers, service jobs, staff access, receipts, devices and licensing from one cloud-connected system built for real shop operations.</p>
             <div class="hero-actions">
-              <a class="btn btn-primary" href="#/login?mode=signup">Create owner account</a>
+              <a class="btn btn-primary" href="#/login?mode=signup">Start 7-day Pro trial</a>
               <a class="btn btn-secondary" href="#/login">Open dashboard</a>
             </div>
             <div class="hero-trust">
               <span><b>Supabase</b> secured data</span>
               <span><b>Android</b> POS terminals</span>
+              <span><b>7-day</b> Pro trial included</span>
               <span><b>GitHub</b> automated releases</span>
             </div>
           </div>
@@ -699,23 +708,53 @@ async function pageLicense(root) {
   ]);
   if (licenseRes.error) throw licenseRes.error;
   if (deviceRes.error) throw deviceRes.error;
+
   const license = licenseRes.data;
   const devices = (deviceRes.data||[]).filter(d=>d.is_active);
   const staffCount = memberRes.data?.length || 0;
+  const trial = license?.status === "trial" ? trialRemaining(license.expires_at) : null;
+  const effectiveStatus =
+    license?.status === "trial" && trial?.days === 0 ? "expired" : license?.status;
 
   root.innerHTML = `
-    ${head("License","MotoPOS plan, limits and current activation status")}
+    ${head("License","MotoPOS plan, trial, limits and current activation status")}
     ${license ? `
+      ${license.status === "trial" ? `
+        <div class="card" style="margin-bottom:14px;border-color:rgba(59,130,246,.28)">
+          <div class="card-title"><h3>7-day Pro Trial</h3>${pill(effectiveStatus)}</div>
+          <div class="help">
+            ${trial?.days > 0
+              ? `Your full MotoPOS Pro trial is active. <strong style="color:var(--text)">${esc(trial.label)}</strong>. No license key is required during the trial.`
+              : "Your 7-day MotoPOS trial has expired. Ask the MotoPOS administrator to issue a paid license to continue licensed operations."}
+          </div>
+        </div>
+      ` : ""}
       <section class="metrics">
-        <article class="metric"><div class="metric-label">Plan</div><div class="metric-value" style="text-transform:capitalize">${esc(license.plan_code)}</div><div class="metric-sub">Key ending ••••${esc(license.license_key_last4||"—")}</div></article>
-        <article class="metric"><div class="metric-label">Status</div><div class="metric-value">${esc(license.status)}</div><div class="metric-sub">${license.expires_at?"Expires "+niceDate(license.expires_at):"No expiration set"}</div></article>
+        <article class="metric">
+          <div class="metric-label">Plan</div>
+          <div class="metric-value" style="text-transform:capitalize">${license.status === "trial" ? "Pro Trial" : esc(license.plan_code)}</div>
+          <div class="metric-sub">${license.status === "trial" ? "Full Pro features for 7 days" : `Key ending ••••${esc(license.license_key_last4||"—")}`}</div>
+        </article>
+        <article class="metric">
+          <div class="metric-label">Status</div>
+          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus)}</div>
+          <div class="metric-sub">${license.expires_at ? `${license.status === "trial" ? (trial?.label || "Trial") : "Expires"} · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
+        </article>
         <article class="metric"><div class="metric-label">Devices</div><div class="metric-value">${devices.length}/${license.max_devices}</div><div class="metric-sub">Active registered devices</div></article>
-        <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.offline_grace_days}-day offline grace</div></article>
+        <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.status === "trial" ? "Trial staff allowance" : `${license.offline_grace_days}-day offline grace`}</div></article>
       </section>
-      <div class="card"><div class="card-title"><h3>License security</h3></div><div class="help">MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when your MotoPOS administrator issues or reissues it.</div></div>
+      <div class="card">
+        <div class="card-title"><h3>${license.status === "trial" ? "Trial rules" : "License security"}</h3></div>
+        <div class="help">
+          ${license.status === "trial"
+            ? "Trial starts automatically when a new shop has no paid license. After 7 days it expires automatically. Issuing a paid license replaces the trial."
+            : "MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when your MotoPOS administrator issues or reissues it."}
+        </div>
+      </div>
     ` : `
-      <div class="empty"><strong>No MotoPOS license assigned</strong>Contact the MotoPOS administrator to issue a Basic, Pro or Business license to this shop.</div>
-    `}`;
+      <div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>
+    `}
+  `;
 }
 
 async function pageDevices(root) {
@@ -818,7 +857,7 @@ async function loadAdminClients() {
           <td>${pill(c.license_status)}${c.license_key_last4?`<div class="help">••••${esc(c.license_key_last4)}</div>`:""}</td>
           <td>${number(c.device_count)}/${c.max_devices??"—"}</td>
           <td>${number(c.member_count)}/${c.max_staff??"—"}</td>
-          <td>${niceDate(c.expires_at)}</td>
+          <td>${c.license_status === "trial" && c.expires_at ? `<strong>${esc(trialRemaining(c.expires_at)?.label || "Trial")}</strong><div class="help">${niceDate(c.expires_at)}</div>` : niceDate(c.expires_at)}</td>
           <td><div class="actions">
             <button class="btn btn-primary btn-sm issue-license" data-shop="${esc(c.shop_id)}" data-name="${esc(c.shop_name)}">Issue</button>
             ${c.license_status!=="unlicensed" ? `<button class="btn ${c.license_status==="suspended"?"btn-success":"btn-danger"} btn-sm status-license" data-shop="${esc(c.shop_id)}" data-status="${c.license_status==="suspended"?"active":"suspended"}">${c.license_status==="suspended"?"Reactivate":"Suspend"}</button>` : ""}
