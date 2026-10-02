@@ -23,7 +23,9 @@ const state = {
   shop: null,
   isSystemAdmin: false,
   authMode: "signin",
-  busy: false
+  busy: false,
+  supportThreadId: null,
+  supportChannel: null
 };
 
 const money = value => new Intl.NumberFormat("en-PH", {
@@ -103,19 +105,19 @@ function currentPath() {
 
 function rolePages(role) {
   const r = String(role || "").toLowerCase();
-  const full = ["overview","sales","inventory","customers","staff","service","suppliers","reports","license","devices","settings"];
+  const full = ["overview","sales","inventory","customers","staff","service","suppliers","reports","support","license","devices","settings"];
   if (["owner","admin","manager"].includes(r)) return full;
-  if (r === "cashier") return ["overview","sales","customers","service","license"];
-  if (r === "inventory") return ["overview","inventory","suppliers","license"];
-  if (r === "mechanic") return ["overview","customers","service","license"];
-  return ["overview","license"];
+  if (r === "cashier") return ["overview","sales","customers","service","support","license"];
+  if (r === "inventory") return ["overview","inventory","suppliers","support","license"];
+  if (r === "mechanic") return ["overview","customers","service","support","license"];
+  return ["overview","support","license"];
 }
 
 function navLabel(page) {
   return ({
     overview:"Overview", sales:"Sales", inventory:"Inventory", customers:"Customers",
     staff:"Staff", service:"Service Jobs", suppliers:"Suppliers", reports:"Reports",
-    license:"License", devices:"Devices", settings:"Settings"
+    support:"Support Chat", license:"License", devices:"Devices", settings:"Settings"
   })[page] || page;
 }
 
@@ -500,6 +502,7 @@ async function loadDashboardPage(page) {
       case "service": return await pageService(root);
       case "suppliers": return await pageSuppliers(root);
       case "reports": return await pageReports(root);
+      case "support": return await pageSupport(root);
       case "license": return await pageLicense(root);
       case "devices": return await pageDevices(root);
       case "settings": return await pageSettings(root);
@@ -581,15 +584,178 @@ async function pageSales(root) {
 }
 
 async function pageInventory(root) {
-  const { data, error } = await supabase.from("products")
-    .select("id,name,sku,brand,cost_price,selling_price,stock_quantity,reorder_level,unit,is_active")
-    .eq("shop_id",state.shop.id).order("name");
-  if (error) throw error;
+  const canManage = ["owner","admin","manager","inventory"].includes(state.membership.role);
+  const [productRes, categoryRes] = await Promise.all([
+    supabase.from("products")
+      .select("id,category_id,name,sku,barcode,brand,description,part_number,item_type,cost_price,selling_price,wholesale_price,stock_quantity,reorder_level,track_stock,unit,shelf_location,oem,warranty_days,is_active")
+      .eq("shop_id",state.shop.id).order("name"),
+    supabase.from("product_categories")
+      .select("id,name,is_active")
+      .eq("shop_id",state.shop.id).order("sort_order").order("name")
+  ]);
+  if (productRes.error) throw productRes.error;
+  if (categoryRes.error) throw categoryRes.error;
+
+  const products = productRes.data || [];
+  const categories = categoryRes.data || [];
+  const lowCount = products.filter(p=>p.is_active && Number(p.stock_quantity)<=Number(p.reorder_level)).length;
+  const stockValue = products.filter(p=>p.is_active).reduce((sum,p)=>sum+(Number(p.stock_quantity||0)*Number(p.cost_price||0)),0);
+
   root.innerHTML = `
-    ${head("Inventory","Parts, prices and stock levels")}
-    <div class="table-wrap"><table><thead><tr><th>Product</th><th>SKU</th><th>Brand</th><th>Stock</th><th>Cost</th><th>Selling</th><th>Status</th></tr></thead><tbody>
-      ${(data||[]).map(p=>`<tr><td><strong>${esc(p.name)}</strong></td><td>${esc(p.sku)}</td><td>${esc(p.brand||"—")}</td><td>${number(p.stock_quantity)} ${esc(p.unit||"pc")}</td><td>${money(p.cost_price)}</td><td><strong>${money(p.selling_price)}</strong></td><td>${Number(p.stock_quantity)<=Number(p.reorder_level)?pill("low stock"):pill(p.is_active?"active":"inactive")}</td></tr>`).join("") || '<tr><td colspan="7">No products yet.</td></tr>'}
+    ${head(
+      "Inventory",
+      "Add products, edit pricing, adjust stock and archive items",
+      canManage ? '<button id="add-product" class="btn btn-primary">Add product</button>' : ""
+    )}
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Products</div><div class="metric-value">${number(products.filter(p=>p.is_active).length)}</div><div class="metric-sub">Active catalog items</div></article>
+      <article class="metric"><div class="metric-label">Low stock</div><div class="metric-value">${number(lowCount)}</div><div class="metric-sub">Need replenishment</div></article>
+      <article class="metric"><div class="metric-label">Inventory cost</div><div class="metric-value">${money(stockValue)}</div><div class="metric-sub">Current stock × cost</div></article>
+      <article class="metric"><div class="metric-label">Archived</div><div class="metric-value">${number(products.filter(p=>!p.is_active).length)}</div><div class="metric-sub">Hidden from normal selling</div></article>
+    </section>
+    <div class="table-wrap"><table><thead><tr><th>Product</th><th>SKU / Barcode</th><th>Stock</th><th>Cost</th><th>Selling</th><th>Status</th>${canManage?"<th>Manage</th>":""}</tr></thead><tbody>
+      ${products.map(p=>`<tr>
+        <td><strong>${esc(p.name)}</strong><div class="help">${esc(p.brand||p.part_number||p.item_type||"—")}</div></td>
+        <td>${esc(p.sku)}<div class="help">${esc(p.barcode||"No barcode")}</div></td>
+        <td><strong>${number(p.stock_quantity)} ${esc(p.unit||"pc")}</strong><div class="help">Reorder at ${number(p.reorder_level)}</div></td>
+        <td>${money(p.cost_price)}</td>
+        <td><strong>${money(p.selling_price)}</strong></td>
+        <td>${!p.is_active ? pill("inactive") : Number(p.stock_quantity)<=Number(p.reorder_level)?pill("low stock"):pill("active")}</td>
+        ${canManage?`<td><div class="inventory-actions">
+          <button class="btn btn-secondary btn-sm edit-product" data-id="${p.id}">Edit</button>
+          <button class="btn btn-secondary btn-sm adjust-stock" data-id="${p.id}">Stock</button>
+          <button class="btn ${p.is_active?"btn-danger":"btn-success"} btn-sm toggle-product" data-id="${p.id}" data-active="${p.is_active?"0":"1"}">${p.is_active?"Archive":"Restore"}</button>
+        </div></td>`:""}
+      </tr>`).join("") || `<tr><td colspan="${canManage?7:6}">No products yet.</td></tr>`}
     </tbody></table></div>`;
+
+  document.querySelector("#add-product")?.addEventListener("click",()=>openProductModal(root,null,categories));
+  root.querySelectorAll(".edit-product").forEach(btn=>{
+    const product=products.find(p=>p.id===btn.dataset.id);
+    btn.addEventListener("click",()=>openProductModal(root,product,categories));
+  });
+  root.querySelectorAll(".adjust-stock").forEach(btn=>{
+    const product=products.find(p=>p.id===btn.dataset.id);
+    btn.addEventListener("click",()=>openStockModal(root,product));
+  });
+  root.querySelectorAll(".toggle-product").forEach(btn=>btn.addEventListener("click",async()=>{
+    const active=btn.dataset.active==="1";
+    const { error } = await supabase.from("products")
+      .update({is_active:active,updated_at:new Date().toISOString()})
+      .eq("id",btn.dataset.id)
+      .eq("shop_id",state.shop.id);
+    if(error) return toast(friendlyError(error),"error");
+    toast(active?"Product restored.":"Product archived.","success");
+    await pageInventory(root);
+  }));
+}
+
+function openProductModal(root, product, categories) {
+  showModal(`
+    <h2>${product?"Edit product":"Add product"}</h2>
+    <p>${product?"Update product information. Use Stock Adjustment for quantity changes.":"Create a new product in this shop's inventory."}</p>
+    <form id="product-form" class="form">
+      <div class="grid-2">
+        <div class="field"><label>Product name</label><input class="input" name="name" required value="${esc(product?.name||"")}" placeholder="CVT Cleaning Kit"></div>
+        <div class="field"><label>SKU</label><input class="input" name="sku" required value="${esc(product?.sku||"")}" placeholder="CVT-001"></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Barcode</label><input class="input" name="barcode" value="${esc(product?.barcode||"")}"></div>
+        <div class="field"><label>Brand</label><input class="input" name="brand" value="${esc(product?.brand||"")}"></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Category</label><select class="input" name="category_id"><option value="">No category</option>${categories.filter(x=>x.is_active).map(x=>`<option value="${x.id}" ${product?.category_id===x.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Type</label><select class="input" name="item_type">
+          ${["part","accessory","oil","tire","battery","service_item","other"].map(x=>`<option value="${x}" ${(product?.item_type||"part")===x?"selected":""}>${x.replace("_"," ")}</option>`).join("")}
+        </select></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Cost price</label><input class="input" type="number" step="0.01" min="0" name="cost_price" value="${product?.cost_price??0}" required></div>
+        <div class="field"><label>Selling price</label><input class="input" type="number" step="0.01" min="0" name="selling_price" value="${product?.selling_price??0}" required></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Reorder level</label><input class="input" type="number" step="0.01" min="0" name="reorder_level" value="${product?.reorder_level??5}" required></div>
+        <div class="field"><label>Unit</label><input class="input" name="unit" value="${esc(product?.unit||"pc")}" required></div>
+      </div>
+      ${product?"":'<div class="field"><label>Opening stock</label><input class="input" type="number" step="0.01" min="0" name="opening_stock" value="0"></div>'}
+      <div class="grid-2">
+        <div class="field"><label>Part number</label><input class="input" name="part_number" value="${esc(product?.part_number||"")}"></div>
+        <div class="field"><label>Shelf location</label><input class="input" name="shelf_location" value="${esc(product?.shelf_location||"")}"></div>
+      </div>
+      <div class="field"><label>Description</label><textarea class="input" name="description">${esc(product?.description||"")}</textarea></div>
+      <div class="modal-actions"><button type="button" id="close-product" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">${product?"Save changes":"Add product"}</button></div>
+    </form>`);
+  document.querySelector("#close-product")?.addEventListener("click",closeModal);
+  document.querySelector("#product-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const button=event.currentTarget.querySelector('button[type="submit"]');
+    button.disabled=true; button.textContent="Saving…";
+    const payload={
+      shop_id:state.shop.id,
+      category_id:String(fd.get("category_id")||"")||null,
+      name:String(fd.get("name")||"").trim(),
+      sku:String(fd.get("sku")||"").trim(),
+      barcode:String(fd.get("barcode")||"").trim()||null,
+      brand:String(fd.get("brand")||"").trim()||null,
+      item_type:String(fd.get("item_type")||"part"),
+      cost_price:Number(fd.get("cost_price")||0),
+      selling_price:Number(fd.get("selling_price")||0),
+      reorder_level:Number(fd.get("reorder_level")||0),
+      unit:String(fd.get("unit")||"pc").trim()||"pc",
+      part_number:String(fd.get("part_number")||"").trim()||null,
+      shelf_location:String(fd.get("shelf_location")||"").trim()||null,
+      description:String(fd.get("description")||"").trim()||null,
+      updated_at:new Date().toISOString()
+    };
+    try{
+      let saved;
+      if(product){
+        const res=await supabase.from("products").update(payload).eq("id",product.id).eq("shop_id",state.shop.id).select("id").single();
+        if(res.error) throw res.error;
+        saved=res.data;
+      }else{
+        const res=await supabase.from("products").insert({...payload,stock_quantity:0,is_active:true}).select("id").single();
+        if(res.error) throw res.error;
+        saved=res.data;
+        const opening=Number(fd.get("opening_stock")||0);
+        if(opening>0){
+          const adj=await supabase.rpc("adjust_inventory_stock",{p_product_id:saved.id,p_quantity_delta:opening,p_reason:"opening",p_notes:"Opening stock"});
+          if(adj.error) throw adj.error;
+        }
+      }
+      closeModal(); toast(product?"Product updated.":"Product added.","success"); await pageInventory(root);
+    }catch(error){
+      toast(friendlyError(error),"error"); button.disabled=false; button.textContent=product?"Save changes":"Add product";
+    }
+  });
+}
+
+function openStockModal(root, product) {
+  showModal(`
+    <h2>Adjust stock</h2>
+    <p><strong>${esc(product.name)}</strong> · Current stock: ${number(product.stock_quantity)} ${esc(product.unit||"pc")}</p>
+    <form id="stock-form" class="form">
+      <div class="field"><label>Quantity change</label><input class="input" type="number" step="0.01" name="delta" required placeholder="Use +10 to add or -2 to deduct"></div>
+      <div class="field"><label>Reason</label><select class="input" name="reason"><option value="adjustment">Manual adjustment</option><option value="opening">Opening stock</option><option value="return">Customer/Supplier return</option><option value="damage">Damaged stock</option><option value="theft">Lost/Theft</option></select></div>
+      <div class="field"><label>Notes</label><textarea class="input" name="notes" placeholder="Why is stock being adjusted?"></textarea></div>
+      <div class="modal-actions"><button type="button" id="close-stock" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Apply adjustment</button></div>
+    </form>`);
+  document.querySelector("#close-stock")?.addEventListener("click",closeModal);
+  document.querySelector("#stock-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const delta=Number(fd.get("delta")||0);
+    if(!delta) return toast("Enter a non-zero stock adjustment.","error");
+    const {error}=await supabase.rpc("adjust_inventory_stock",{
+      p_product_id:product.id,
+      p_quantity_delta:delta,
+      p_reason:String(fd.get("reason")||"adjustment"),
+      p_notes:String(fd.get("notes")||"").trim()||null
+    });
+    if(error) return toast(friendlyError(error),"error");
+    closeModal(); toast("Stock adjusted and movement recorded.","success"); await pageInventory(root);
+  });
 }
 
 async function pageCustomers(root) {
@@ -731,6 +897,136 @@ async function pageReports(root) {
     </section>`;
 }
 
+async function pageSupport(root) {
+  const { data: threads, error } = await supabase.from("support_threads")
+    .select("id,subject,status,priority,last_message_at,created_at")
+    .eq("shop_id",state.shop.id)
+    .order("last_message_at",{ascending:false});
+  if(error) throw error;
+  const list=threads||[];
+  if(!state.supportThreadId || !list.some(t=>t.id===state.supportThreadId)) state.supportThreadId=list[0]?.id||null;
+
+  root.innerHTML=`
+    ${head("Support Chat","Talk directly with MotoPOS support",'<button id="new-support" class="btn btn-primary">New conversation</button>')}
+    <div class="chat-layout">
+      <div class="chat-list">
+        ${list.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.subject)}</strong><span>${esc(t.status)} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No conversations</strong>Start a support chat whenever you need help.</div>'}
+      </div>
+      <div id="support-chat-panel" class="chat-panel"></div>
+    </div>`;
+
+  document.querySelector("#new-support")?.addEventListener("click",()=>openNewSupportThread(root));
+  root.querySelectorAll(".chat-thread").forEach(btn=>btn.addEventListener("click",async()=>{
+    state.supportThreadId=btn.dataset.thread;
+    await pageSupport(root);
+  }));
+  await renderSupportChatPanel(document.querySelector("#support-chat-panel"),state.supportThreadId,false);
+}
+
+function openNewSupportThread(root) {
+  showModal(`
+    <h2>New support conversation</h2>
+    <p>Describe what you need help with. Your message will appear in the MotoPOS Developer Support inbox.</p>
+    <form id="new-support-form" class="form">
+      <div class="field"><label>Subject</label><input class="input" name="subject" minlength="3" maxlength="160" required placeholder="Example: Printer not connecting"></div>
+      <div class="field"><label>Priority</label><select class="input" name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option><option value="low">Low</option></select></div>
+      <div class="field"><label>Message</label><textarea class="input" name="message" minlength="1" maxlength="4000" required placeholder="Tell us what happened…"></textarea></div>
+      <div class="modal-actions"><button type="button" id="close-support-new" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Start chat</button></div>
+    </form>`);
+  document.querySelector("#close-support-new")?.addEventListener("click",closeModal);
+  document.querySelector("#new-support-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const {data:thread,error}=await supabase.from("support_threads").insert({
+      shop_id:state.shop.id,
+      created_by:state.user.id,
+      subject:String(fd.get("subject")||"").trim(),
+      priority:String(fd.get("priority")||"normal"),
+      status:"open"
+    }).select("id").single();
+    if(error) return toast(friendlyError(error),"error");
+    const msg=await supabase.from("support_messages").insert({
+      thread_id:thread.id,
+      shop_id:state.shop.id,
+      sender_id:state.user.id,
+      sender_type:"customer",
+      body:String(fd.get("message")||"").trim()
+    });
+    if(msg.error) return toast(friendlyError(msg.error),"error");
+    state.supportThreadId=thread.id;
+    closeModal(); toast("Support conversation started.","success"); await pageSupport(root);
+  });
+}
+
+async function renderSupportChatPanel(panel, threadId, adminMode) {
+  if(state.supportChannel){
+    await supabase.removeChannel(state.supportChannel);
+    state.supportChannel=null;
+  }
+  if(!panel) return;
+  if(!threadId){
+    panel.innerHTML='<div class="empty" style="margin:auto"><strong>Select a conversation</strong>Messages will appear here.</div>';
+    return;
+  }
+
+  const [threadRes,messageRes]=await Promise.all([
+    supabase.from("support_threads").select("id,shop_id,subject,status,priority,last_message_at,shop:shops(name)").eq("id",threadId).single(),
+    supabase.from("support_messages").select("id,body,sender_type,created_at,sender_id").eq("thread_id",threadId).order("created_at")
+  ]);
+  if(threadRes.error){panel.innerHTML=`<div class="empty"><strong>Unable to load chat</strong>${esc(friendlyError(threadRes.error))}</div>`;return;}
+  if(messageRes.error){panel.innerHTML=`<div class="empty"><strong>Unable to load messages</strong>${esc(friendlyError(messageRes.error))}</div>`;return;}
+  const t=threadRes.data;
+  const messages=messageRes.data||[];
+
+  panel.innerHTML=`
+    <div class="chat-head">
+      <div><strong>${esc(t.subject)}</strong><div class="help">${adminMode?esc(t.shop?.name||"Shop")+" · ":""}${esc(t.priority)} priority · ${esc(t.status)}</div></div>
+      ${adminMode?`<select id="support-status" class="input" style="width:auto;height:38px"><option value="open" ${t.status==="open"?"selected":""}>Open</option><option value="pending" ${t.status==="pending"?"selected":""}>Pending</option><option value="closed" ${t.status==="closed"?"selected":""}>Closed</option></select>`:pill(t.status)}
+    </div>
+    <div class="chat-messages" id="support-message-list">
+      ${messages.map(m=>{
+        const mine=adminMode?m.sender_type==="support":m.sender_type==="customer";
+        return `<div class="chat-bubble ${mine?"support":""}"><p>${esc(m.body)}</p><small>${m.sender_type==="support"?"MotoPOS Support":adminMode?"Customer":"You"} · ${niceDate(m.created_at,true)}</small></div>`;
+      }).join("")||'<div class="empty"><strong>No messages yet</strong>Send the first message below.</div>'}
+    </div>
+    <form id="support-compose" class="chat-compose">
+      <input class="input" name="message" maxlength="4000" autocomplete="off" placeholder="${t.status==="closed"&&!adminMode?"Conversation closed":"Type a message…"}" ${t.status==="closed"&&!adminMode?"disabled":""}>
+      <button class="btn btn-primary" type="submit" ${t.status==="closed"&&!adminMode?"disabled":""}>Send</button>
+    </form>`;
+
+  const list=panel.querySelector("#support-message-list");
+  if(list) list.scrollTop=list.scrollHeight;
+
+  panel.querySelector("#support-status")?.addEventListener("change",async e=>{
+    const {error}=await supabase.from("support_threads").update({status:e.target.value,updated_at:new Date().toISOString()}).eq("id",threadId);
+    if(error) return toast(friendlyError(error),"error");
+    toast("Support status updated.","success");
+  });
+
+  panel.querySelector("#support-compose")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const body=String(fd.get("message")||"").trim();
+    if(!body) return;
+    const {error}=await supabase.from("support_messages").insert({
+      thread_id:threadId,
+      shop_id:t.shop_id,
+      sender_id:state.user.id,
+      sender_type:adminMode?"support":"customer",
+      body
+    });
+    if(error) return toast(friendlyError(error),"error");
+    event.currentTarget.reset();
+    await renderSupportChatPanel(panel,threadId,adminMode);
+  });
+
+  state.supportChannel=supabase.channel(`support-${threadId}-${Date.now()}`)
+    .on("postgres_changes",{event:"INSERT",schema:"public",table:"support_messages",filter:`thread_id=eq.${threadId}`},async()=> {
+      if(document.body.contains(panel)) await renderSupportChatPanel(panel,threadId,adminMode);
+    })
+    .subscribe();
+}
+
 async function pageLicense(root) {
   const [licenseRes, deviceRes, memberRes] = await Promise.all([
     supabase.from("shop_licenses").select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days").eq("shop_id",state.shop.id).maybeSingle(),
@@ -836,19 +1132,24 @@ async function renderAdmin() {
     return;
   }
 
+  const path=currentPath();
+  const section=path==="admin/users"?"users":path==="admin/support"?"support":"clients";
+
   app.innerHTML = `
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></div>
         <div class="shop-chip"><strong>Developer Control</strong><span>System administrator</span></div>
         <nav class="nav-list">
-          <a class="nav-item active" href="#/admin"><span>Clients & Licenses</span><span class="nav-badge">ADMIN</span></a>
+          <a class="nav-item ${section==="clients"?"active":""}" href="#/admin"><span>Clients & Licenses</span><span class="nav-badge">ADMIN</span></a>
+          <a class="nav-item ${section==="users"?"active":""}" href="#/admin/users"><span>Users & Emails</span></a>
+          <a class="nav-item ${section==="support"?"active":""}" href="#/admin/support"><span>Support Inbox</span></a>
           ${state.shop ? '<a class="nav-item" href="#/dashboard/overview"><span>My Shop</span></a>' : ""}
         </nav>
         <div class="sidebar-bottom"><button id="admin-sign-out" class="btn btn-secondary" style="width:100%">Sign out</button></div>
       </aside>
       <div class="main">
-        <header class="topbar"><div class="topbar-title"><strong>MotoPOS Control Center</strong><span>License and client administration</span></div><div class="user-pill"><div class="avatar">A</div><div class="user-copy"><strong style="font-size:12px">${esc(state.user?.email||"")}</strong><div class="help">system admin</div></div></div></header>
+        <header class="topbar"><div class="topbar-title"><strong>MotoPOS Control Center</strong><span>Users, licenses, support and clients</span></div><div class="user-pill"><div class="avatar">A</div><div class="user-copy"><strong style="font-size:12px">${esc(state.user?.email||"")}</strong><div class="help">system admin</div></div></div></header>
         <main id="admin-content" class="content"><div class="loading-block"></div></main>
       </div>
     </div>`;
@@ -856,7 +1157,10 @@ async function renderAdmin() {
   document.querySelector("#admin-sign-out")?.addEventListener("click", async()=>{
     await supabase.auth.signOut(); state.session=state.user=null; setHash("");
   });
-  await loadAdminClients();
+
+  if(section==="users") await loadAdminUsers();
+  else if(section==="support") await loadAdminSupport();
+  else await loadAdminClients();
 }
 
 async function loadAdminClients() {
@@ -900,6 +1204,97 @@ async function loadAdminClients() {
   root.querySelectorAll(".issue-license").forEach(btn=>btn.addEventListener("click",()=>openLicenseModal(btn.dataset.shop,btn.dataset.name)));
   root.querySelectorAll(".status-license").forEach(btn=>btn.addEventListener("click",()=>setLicenseStatus(btn.dataset.shop,btn.dataset.status)));
   root.querySelectorAll(".reset-devices").forEach(btn=>btn.addEventListener("click",()=>resetDevices(btn.dataset.shop)));
+}
+
+async function loadAdminUsers() {
+  const root=document.querySelector("#admin-content");
+  if(!root) return;
+  const {data,error}=await supabase.functions.invoke("admin-users",{body:{action:"list"}});
+  if(error||data?.error){
+    root.innerHTML=`<div class="empty"><strong>Unable to load users</strong>${esc(friendlyError(data?.error||error))}</div>`;
+    return;
+  }
+  const users=data?.users||[];
+  root.innerHTML=`
+    ${head("Users & Emails","Manage MotoPOS Auth accounts safely")}
+    <div class="card danger-zone" style="margin-bottom:14px"><div class="help"><strong style="color:var(--text)">Permanent Delete</strong> removes an Auth account only when it has no protected business history. <strong style="color:var(--text)">Remove Email & Disable</strong> is the safe option for accounts linked to old sales or service records.</div></div>
+    <div class="table-wrap"><table><thead><tr><th>User</th><th>Email</th><th>Membership</th><th>Email</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      ${users.map(u=>{
+        const membership=(u.memberships||[]).filter(m=>m.is_active).map(m=>`${m.shop?.name||"Shop"} · ${m.role}`).join(", ");
+        const banned=u.banned_until && new Date(u.banned_until)>new Date();
+        return `<tr>
+          <td><strong>${esc(u.display_name||"MotoPOS User")}</strong><div class="help">${esc(u.id.slice(0,8))}… ${u.is_system_admin?"· SYSTEM ADMIN":""}</div></td>
+          <td>${esc(u.email||"—")}</td>
+          <td>${esc(membership||"No active shop")}</td>
+          <td>${pill(u.email_confirmed_at?"verified":"unverified")}</td>
+          <td>${pill(banned||u.profile_active===false?"disabled":"active")}</td>
+          <td><div class="actions">
+            ${u.is_system_admin?'<span class="help">Protected admin</span>':`
+              <button class="btn btn-secondary btn-sm user-ban" data-id="${u.id}" data-ban="${banned?"0":"1"}">${banned?"Enable":"Disable"}</button>
+              <button class="btn btn-danger btn-sm user-anonymize" data-id="${u.id}" data-email="${esc(u.email||"")}">Remove Email</button>
+              <button class="btn btn-danger btn-sm user-delete" data-id="${u.id}" data-email="${esc(u.email||"")}">Delete</button>
+            `}
+          </div></td>
+        </tr>`;
+      }).join("")||'<tr><td colspan="6">No users found.</td></tr>'}
+    </tbody></table></div>`;
+
+  root.querySelectorAll(".user-ban").forEach(btn=>btn.addEventListener("click",()=>adminUserAction(btn.dataset.id,btn.dataset.ban==="1"?"ban":"unban")));
+  root.querySelectorAll(".user-anonymize").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm(`Remove the original email ${btn.dataset.email} and permanently disable login? Business history will be preserved.`)) return;
+    await adminUserAction(btn.dataset.id,"disable_anonymize");
+  }));
+  root.querySelectorAll(".user-delete").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm(`Permanently delete ${btn.dataset.email}? This only works when the account has no protected business history.`)) return;
+    await adminUserAction(btn.dataset.id,"delete");
+  }));
+}
+
+async function adminUserAction(userId,action){
+  const {data,error}=await supabase.functions.invoke("admin-users",{body:{action,user_id:userId}});
+  if(error||data?.error){
+    toast(data?.error||friendlyError(error),"error");
+    return;
+  }
+  toast(
+    action==="delete"?"User permanently deleted.":
+    action==="disable_anonymize"?"Original email removed and account disabled.":
+    action==="ban"?"User disabled.":"User enabled.",
+    "success"
+  );
+  await loadAdminUsers();
+}
+
+async function loadAdminSupport() {
+  const root=document.querySelector("#admin-content");
+  if(!root) return;
+  const {data,error}=await supabase.from("support_threads")
+    .select("id,shop_id,subject,status,priority,last_message_at,created_at,shop:shops(name)")
+    .order("last_message_at",{ascending:false})
+    .limit(200);
+  if(error){
+    root.innerHTML=`<div class="empty"><strong>Unable to load support inbox</strong>${esc(friendlyError(error))}</div>`;
+    return;
+  }
+  const threads=data||[];
+  if(!state.supportThreadId || !threads.some(t=>t.id===state.supportThreadId)) state.supportThreadId=threads[0]?.id||null;
+  root.innerHTML=`
+    ${head("Support Inbox","Live conversations from MotoPOS client shops")}
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Open</div><div class="metric-value">${number(threads.filter(t=>t.status==="open").length)}</div><div class="metric-sub">Need attention</div></article>
+      <article class="metric"><div class="metric-label">Pending</div><div class="metric-value">${number(threads.filter(t=>t.status==="pending").length)}</div><div class="metric-sub">Waiting / in progress</div></article>
+      <article class="metric"><div class="metric-label">Urgent</div><div class="metric-value">${number(threads.filter(t=>t.priority==="urgent"&&t.status!=="closed").length)}</div><div class="metric-sub">High priority queue</div></article>
+      <article class="metric"><div class="metric-label">Closed</div><div class="metric-value">${number(threads.filter(t=>t.status==="closed").length)}</div><div class="metric-sub">Resolved conversations</div></article>
+    </section>
+    <div class="chat-layout">
+      <div class="chat-list">${threads.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.shop?.name||"Shop")} · ${esc(t.subject)}</strong><span>${esc(t.priority)} · ${esc(t.status)} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No support requests</strong>Client chats will appear here.</div>'}</div>
+      <div id="admin-support-panel" class="chat-panel"></div>
+    </div>`;
+  root.querySelectorAll(".chat-thread").forEach(btn=>btn.addEventListener("click",async()=>{
+    state.supportThreadId=btn.dataset.thread;
+    await loadAdminSupport();
+  }));
+  await renderSupportChatPanel(document.querySelector("#admin-support-panel"),state.supportThreadId,true);
 }
 
 function openLicenseModal(shopId, shopName) {
@@ -985,13 +1380,13 @@ async function route() {
     return;
   }
 
-  if (path === "admin") {
+  if (path === "admin" || path.startsWith("admin/")) {
     await renderAdmin();
     return;
   }
 
   if (!state.membership || !state.shop) {
-    if (state.isSystemAdmin && path === "admin") await renderAdmin();
+    if (state.isSystemAdmin && (path === "admin" || path.startsWith("admin/"))) await renderAdmin();
     else renderSetup();
     return;
   }
