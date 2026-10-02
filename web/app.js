@@ -141,7 +141,7 @@ function friendlyError(error) {
   const lower = raw.toLowerCase();
   if (lower.includes("invalid login credentials")) return "Incorrect email or password.";
   if (lower.includes("email not confirmed")) return "Verify your email first, then sign in.";
-  if (lower.includes("over_email_send_rate_limit")) return "Please wait about a minute before requesting another verification email.";
+  if (lower.includes("over_email_send_rate_limit") || lower.includes("email rate limit exceeded")) return "Verification email limit reached. Please try again later. For production sign-ups, MotoPOS needs a custom SMTP email provider.";
   if (lower.includes("unexpected status code returned from hook: 405")) return "Account creation is temporarily unavailable because the email hook is misconfigured. Please contact MotoPOS Support.";
   if (lower.includes("row-level security") || lower.includes("permission denied")) return "Your account does not have permission for that action.";
   if (lower.includes("network") || lower.includes("fetch")) return "Unable to reach MotoPOS Cloud. Check your internet connection.";
