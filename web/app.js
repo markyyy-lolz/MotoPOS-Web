@@ -2,6 +2,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 const SUPABASE_URL = "https://qgyzdoltjlryjthxxscw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_mCjtfE-W75s1yyUdw2NY2g_z6ic5DIc";
+const EMAIL_CONFIRM_REDIRECT = "https://markyyy-lolz.github.io/MotoPOS-Web/?email-confirmed=1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -157,6 +158,33 @@ async function loadAccessContext() {
   state.membership = memberRes.data || null;
   state.shop = memberRes.data?.shop || null;
   state.isSystemAdmin = Boolean(adminRes.data);
+}
+
+function renderEmailVerified() {
+  const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const errorDescription = hashParams.get("error_description");
+  const failed = Boolean(hashParams.get("error") || hashParams.get("error_code"));
+
+  app.innerHTML = `
+    <div class="setup">
+      <div class="setup-card">
+        <div class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></div>
+        <div style="height:14px"></div>
+        <span class="eyebrow">${failed ? "Verification problem" : "Email verified"}</span>
+        <h1>${failed ? "We couldn't verify that link" : "Email confirmed successfully"}</h1>
+        <p>${
+          failed
+            ? esc(errorDescription || "The confirmation link may have expired or already been used.")
+            : "Your MotoPOS email is verified. You can return to the Android app and sign in, or continue to MotoPOS Cloud here."
+        }</p>
+        <div class="form">
+          ${failed
+            ? '<a class="btn btn-primary" href="#/login?mode=signup">Create / resend from sign up</a>'
+            : '<a class="btn btn-primary" href="#/login">Continue to MotoPOS Cloud</a>'}
+          <a class="btn btn-secondary" href="#/">Back to MotoPOS website</a>
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderLanding() {
@@ -329,7 +357,10 @@ async function handleAuth(event) {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { display_name: displayName } }
+        options: {
+          data: { display_name: displayName },
+          emailRedirectTo: EMAIL_CONFIRM_REDIRECT
+        }
       });
       if (error) throw error;
       if (data.session) {
@@ -942,6 +973,11 @@ async function resetDevices(shopId) {
 
 async function route() {
   const path = currentPath();
+
+  if (new URLSearchParams(location.search).get("email-confirmed") === "1") {
+    renderEmailVerified();
+    return;
+  }
 
   if (!state.session) {
     if (path.startsWith("login")) renderAuth();
