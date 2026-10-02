@@ -564,9 +564,25 @@ function renderLanding() {
             <div class="loading-block"></div><div class="loading-block"></div><div class="loading-block"></div>
           </div>
         </section>
+
+        <section class="section founder-section">
+          <div class="founder-card reveal-motion is-visible">
+            <div class="founder-mark">MR</div>
+            <div class="founder-copy">
+              <span class="kicker">Meet the developer</span>
+              <h2>Hi, I’m Mark Reymuel Pascual.</h2>
+              <p>I’m the developer behind MotoPOS, building practical digital tools for real workflows. MotoPOS is focused on helping motorcycle shops manage sales, inventory, service jobs, staff access, customers, support, and cloud operations in one connected system.</p>
+              <p class="founder-note">Have a question, suggestion, partnership idea, or need help with MotoPOS? You can contact me directly on Facebook.</p>
+              <div class="founder-actions">
+                <a class="btn btn-primary" href="https://facebook.com/profile.php?id=61590474910314" target="_blank" rel="noopener noreferrer">Contact me on Facebook</a>
+                <a class="btn btn-secondary" href="#/manual">Read the MotoPOS manual</a>
+              </div>
+            </div>
+          </div>
+        </section>
       </main>
 
-      <footer class="footer"><span>© 2026 MotoPOS Cloud</span><span><a href="#/manual">App Manual</a> · Motorcycle parts • Service • POS • Licensing</span></footer>
+      <footer class="footer"><span>© 2026 MotoPOS Cloud · Built by Mark Reymuel Pascual</span><span><a href="#/manual">App Manual</a> · <a href="https://facebook.com/profile.php?id=61590474910314" target="_blank" rel="noopener noreferrer">Facebook Contact</a> · Motorcycle parts • Service • POS • Licensing</span></footer>
     </div>`;
 
   setupMotion();
