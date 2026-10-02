@@ -152,3 +152,29 @@ table{width:100%;border-collapse:collapse;min-width:700px}th,td{text-align:left;
 .admin-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
 .danger-zone{border-color:rgba(251,113,133,.26)!important;background:rgba(251,113,133,.04)!important}
 @media(max-width:900px){.chat-layout{grid-template-columns:1fr}.chat-list{max-height:260px}.chat-panel{min-height:520px}}
+
+.manual-page{background:radial-gradient(circle at 15% 0%,rgba(59,130,246,.1),transparent 34%),var(--bg)}
+.manual-hero{max-width:1180px;margin:auto;padding:72px max(22px,5vw) 34px}
+.manual-hero h1{font-size:clamp(42px,6vw,68px);letter-spacing:-.05em;margin:18px 0 12px}
+.manual-hero>p{max-width:760px;color:var(--muted);font-size:17px;line-height:1.7}
+.manual-search-wrap{max-width:720px;margin-top:26px}.manual-search{height:54px;font-size:15px;background:rgba(255,255,255,.05)}
+.manual-layout{max-width:1280px;margin:auto;padding:10px max(22px,5vw) 80px;display:grid;grid-template-columns:250px minmax(0,1fr);gap:28px;align-items:start}
+.manual-toc{position:sticky;top:94px;border:1px solid var(--line);background:rgba(13,26,43,.72);backdrop-filter:blur(14px);border-radius:20px;padding:14px;max-height:calc(100vh - 120px);overflow:auto}
+.manual-toc>strong{display:block;padding:8px 10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.manual-toc a{display:flex;gap:9px;align-items:center;padding:9px 10px;border-radius:11px;color:var(--muted);font-size:12px;font-weight:750}
+.manual-toc a:hover{background:rgba(59,130,246,.1);color:#bfdbfe}
+.manual-toc a span{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;color:#60a5fa;min-width:20px}
+.manual-content{min-width:0}
+.manual-intro-card{display:flex;justify-content:space-between;gap:24px;align-items:center;padding:24px;border-radius:22px;border:1px solid rgba(59,130,246,.25);background:linear-gradient(135deg,rgba(59,130,246,.11),rgba(34,211,238,.04));margin-bottom:16px}
+.manual-intro-card h2{font-size:26px;letter-spacing:-.03em;margin:6px 0}.manual-intro-card p{margin:0;color:var(--muted);line-height:1.6}
+.manual-version{font-size:20px;font-weight:900;color:#bfdbfe;border:1px solid rgba(59,130,246,.25);padding:11px 14px;border-radius:14px;white-space:nowrap}
+.manual-section{scroll-margin-top:94px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(17,34,57,.73),rgba(12,25,42,.73));border-radius:22px;padding:24px;margin-bottom:14px}
+.manual-section-head{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid var(--line);padding-bottom:17px;margin-bottom:18px}
+.manual-section-head>span{width:38px;height:38px;border-radius:12px;background:rgba(59,130,246,.12);color:#93c5fd;display:grid;place-items:center;font-size:11px;font-weight:900;flex:0 0 auto}
+.manual-section-head h2{margin:0;font-size:23px;letter-spacing:-.025em}.manual-section-head p{margin:5px 0 0;color:var(--muted);line-height:1.55;font-size:13px}
+.manual-body{color:#cad5e4;line-height:1.72;font-size:14px}.manual-body h3{color:var(--text);font-size:15px;margin:19px 0 5px}.manual-body h3:first-child{margin-top:0}.manual-body p{margin:6px 0 13px}.manual-body strong{color:var(--text)}
+.manual-note{border-left:3px solid var(--primary);background:rgba(59,130,246,.08);padding:12px 14px;border-radius:0 12px 12px 0;margin-top:14px}
+.manual-table{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:14px}.manual-table>div{display:grid;grid-template-columns:120px 1fr;gap:14px;padding:12px 14px;border-bottom:1px solid var(--line)}.manual-table>div:last-child{border:0}.manual-table span{color:var(--muted)}
+.manual-faq details{border:1px solid var(--line);border-radius:13px;padding:11px 13px;margin-bottom:8px;background:rgba(255,255,255,.02)}.manual-faq summary{cursor:pointer;color:var(--text);font-weight:800}.manual-faq details p{margin:8px 0 2px;color:var(--muted)}
+@media(max-width:880px){.manual-layout{grid-template-columns:1fr}.manual-toc{position:relative;top:0;max-height:none;display:flex;gap:5px;overflow:auto}.manual-toc>strong{display:none}.manual-toc a{white-space:nowrap;flex:0 0 auto}.manual-hero{padding-top:48px}}
+@media(max-width:620px){.manual-intro-card{align-items:flex-start;flex-direction:column}.manual-section{padding:18px}.manual-table>div{grid-template-columns:1fr;gap:4px}.manual-hero h1{font-size:42px}}

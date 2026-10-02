@@ -204,12 +204,273 @@ function renderEmailVerified() {
     </div>`;
 }
 
+function renderManual() {
+  const sections = [
+    {
+      id: "getting-started",
+      title: "Getting Started",
+      eyebrow: "01",
+      summary: "Create your account, verify your email, create a shop, and start the 7-day Pro Trial.",
+      body: `
+        <h3>1. Create an owner account</h3>
+        <p>Open MotoPOS and choose <strong>Create Account</strong>. Enter the owner's name, email, and password.</p>
+        <h3>2. Verify the email</h3>
+        <p>Open the Supabase verification email and press the confirmation link. It should return to the MotoPOS Cloud confirmation page. After verification, go back to the Android app and sign in.</p>
+        <h3>3. Create the shop workspace</h3>
+        <p>Enter the shop name, phone number, and address. The first account becomes the shop owner.</p>
+        <h3>4. Automatic trial</h3>
+        <p>If the shop has no paid license, MotoPOS automatically starts a <strong>7-day Pro Trial</strong>. No license key is required during the trial.</p>
+      `
+    },
+    {
+      id: "roles",
+      title: "Accounts & Roles",
+      eyebrow: "02",
+      summary: "Understand what Owner, Admin, Manager, Cashier, Inventory, and Mechanic accounts can access.",
+      body: `
+        <div class="manual-table">
+          <div><strong>Owner</strong><span>Full shop control, staff, settings, reports, license and devices.</span></div>
+          <div><strong>Admin</strong><span>Most owner-level shop controls except protected system-level functions.</span></div>
+          <div><strong>Manager</strong><span>Operations, inventory, reports, service and day-to-day supervision.</span></div>
+          <div><strong>Cashier</strong><span>POS, customers, service lookup and permitted transaction tasks.</span></div>
+          <div><strong>Inventory</strong><span>Products, stock, suppliers and inventory adjustments.</span></div>
+          <div><strong>Mechanic</strong><span>Customers, motorcycles and service/job-order workflows.</span></div>
+        </div>
+        <p>Each employee should use a separate MotoPOS account. Do not share the owner login.</p>
+      `
+    },
+    {
+      id: "pos",
+      title: "POS & Checkout",
+      eyebrow: "03",
+      summary: "Add products to the cart, choose a customer, complete payment, and confirm the sale.",
+      body: `
+        <h3>Starting a sale</h3>
+        <p>Open <strong>POS</strong>, search by product name, SKU or barcode, then add items to the cart. Adjust quantities before checkout.</p>
+        <h3>Checkout</h3>
+        <p>Press Checkout, choose the payment method, review totals, discounts and customer information, then complete the transaction.</p>
+        <h3>Transaction Complete</h3>
+        <p>After the database confirms the sale, MotoPOS shows a centered <strong>Transaction Complete</strong> dialog with the sale number and final total. Press <strong>Done</strong> to begin the next sale.</p>
+        <div class="manual-note"><strong>Important:</strong> Stock is deducted only after the sale is successfully completed. If checkout fails, the transaction should not be treated as completed.</div>
+      `
+    },
+    {
+      id: "inventory",
+      title: "Inventory Management",
+      eyebrow: "04",
+      summary: "Add products, edit prices, adjust stock, monitor low stock and archive old items.",
+      body: `
+        <h3>Add a product</h3>
+        <p>Go to <strong>Inventory → Add Product</strong>. Enter the product name, SKU, barcode, brand, type, cost, selling price, reorder level, unit and optional opening stock.</p>
+        <h3>Edit product details</h3>
+        <p>Use <strong>Edit</strong> to update product information, pricing, barcode, brand, part number, shelf location and active status.</p>
+        <h3>Adjust stock</h3>
+        <p>Use <strong>Stock</strong> / <strong>Adjust Stock</strong>. Positive values add stock; negative values deduct stock. Select a reason such as Adjustment, Return, Damage, Theft or Opening Stock and add notes when useful.</p>
+        <h3>Archive instead of deleting</h3>
+        <p>Archive old products when you want to hide them from normal selling while keeping transaction history intact.</p>
+        <div class="manual-note"><strong>Inventory history:</strong> Manual stock adjustments are recorded as inventory movements for accountability.</div>
+      `
+    },
+    {
+      id: "customers",
+      title: "Customers & Motorcycles",
+      eyebrow: "05",
+      summary: "Maintain customer contact information and connect motorcycles to service history.",
+      body: `
+        <p>Use the <strong>Customers</strong> section to store customer name, phone, email and address. Customer records can be connected to motorcycles and service jobs.</p>
+        <p>For service-oriented shops, keep motorcycle details consistent so previous repairs and parts usage are easier to review.</p>
+      `
+    },
+    {
+      id: "service",
+      title: "Service & Job Orders",
+      eyebrow: "06",
+      summary: "Track workshop jobs from complaint and diagnosis through repair and release.",
+      body: `
+        <p>Open <strong>Service</strong> to review job numbers, complaint, priority, odometer and status.</p>
+        <p>Use consistent statuses such as <strong>Waiting → Inspection → Repairing → Testing → Ready → Released</strong> so the whole team knows the motorcycle's current stage.</p>
+        <p>Parts and labor associated with a service job should be attached to the same job order whenever available.</p>
+      `
+    },
+    {
+      id: "staff",
+      title: "Staff Management",
+      eyebrow: "07",
+      summary: "Create separate staff accounts and assign the correct role.",
+      body: `
+        <p>Owners and Shop Admins can open <strong>Staff → Add Staff Account</strong>. Enter the employee's full name, email, temporary password and role.</p>
+        <p>The shop's license controls the maximum number of active staff accounts. Staff should change and protect their login credentials after receiving them.</p>
+      `
+    },
+    {
+      id: "support",
+      title: "Support Chat",
+      eyebrow: "08",
+      summary: "Contact MotoPOS Support directly from the app or web dashboard.",
+      body: `
+        <p>Open <strong>Support</strong> or <strong>Support Chat</strong>, create a new conversation, choose the priority and describe the issue.</p>
+        <p>Replies from the MotoPOS team appear in the same conversation. Conversations may be marked Open, Pending or Closed.</p>
+        <p>For faster troubleshooting, include the device model, app version, affected screen and the exact error message.</p>
+      `
+    },
+    {
+      id: "license",
+      title: "Trial, License & Devices",
+      eyebrow: "09",
+      summary: "Understand the 7-day trial, paid activation, device limits and suspended/expired access.",
+      body: `
+        <h3>7-day Pro Trial</h3>
+        <p>A new shop without a paid license receives the Pro Trial automatically. The app displays the remaining trial days.</p>
+        <h3>Paid activation</h3>
+        <p>When a paid license is issued, a new unregistered Android device may ask for the MotoPOS license key. Enter the key provided by the MotoPOS administrator.</p>
+        <h3>Expired or suspended license</h3>
+        <p>The app blocks licensed operations when the license is expired or suspended. After the administrator renews/reactivates it, press <strong>Check License Again</strong>.</p>
+        <h3>Device limits</h3>
+        <p>Each plan has a maximum number of active devices. Old devices can be reset from the Developer Control Center when necessary.</p>
+      `
+    },
+    {
+      id: "reports",
+      title: "Dashboard & Reports",
+      eyebrow: "10",
+      summary: "Use sales, stock, expenses and service data to monitor shop operations.",
+      body: `
+        <p>The dashboard summarizes sales, active jobs, low-stock products and other role-appropriate information.</p>
+        <p>Reports use cloud data from completed sales and recorded expenses. Owners, admins and managers have broader financial visibility than lower staff roles.</p>
+      `
+    },
+    {
+      id: "web",
+      title: "MotoPOS Cloud Website",
+      eyebrow: "11",
+      summary: "Use the web dashboard for management, inventory, support and shop administration.",
+      body: `
+        <p>The Android app is designed for counter and workshop operations. <strong>MotoPOS Cloud</strong> is the management layer for owners and managers.</p>
+        <p>From the website you can review sales, manage inventory, staff, service jobs, suppliers, reports, support, license status and devices based on your role.</p>
+      `
+    },
+    {
+      id: "admin",
+      title: "System Admin Guide",
+      eyebrow: "12",
+      summary: "Manage client shops, licenses, user accounts and the MotoPOS Support Inbox.",
+      body: `
+        <p>The <strong>Developer Control Center</strong> is only for approved MotoPOS System Admin accounts.</p>
+        <h3>Clients & Licenses</h3>
+        <p>Issue Basic, Pro or Business licenses, set expiration dates, device/staff limits, suspend/reactivate licenses and reset registered devices.</p>
+        <h3>Users & Emails</h3>
+        <p>Disable accounts, remove/anonymize email addresses, or permanently delete accounts when it is safe. Accounts with protected business history should normally be disabled/anonymized rather than force-deleted.</p>
+        <h3>Support Inbox</h3>
+        <p>Review customer conversations, reply as MotoPOS Support and change the request status.</p>
+        <div class="manual-note"><strong>Safety:</strong> Never expose the Supabase service-role key, master credentials or private administrator secrets in the public website or Android APK.</div>
+      `
+    },
+    {
+      id: "troubleshooting",
+      title: "Troubleshooting",
+      eyebrow: "13",
+      summary: "Quick fixes for the most common account, license, connection and transaction issues.",
+      body: `
+        <div class="manual-faq">
+          <details open><summary>Email verification opens localhost</summary><p>Use a newly generated verification email after the MotoPOS redirect URL is configured. Old links may still contain the previous redirect.</p></details>
+          <details><summary>Incorrect email or password</summary><p>Confirm the email is verified, then check the exact email/password used for the account.</p></details>
+          <details><summary>Trial expired</summary><p>Ask the MotoPOS administrator to issue or renew a license, then press Check License Again.</p></details>
+          <details><summary>Device limit reached</summary><p>Deactivate/reset an old device or upgrade the plan's device limit.</p></details>
+          <details><summary>Product cannot go below zero</summary><p>The shop has negative stock disabled. Correct the physical count or receive/add stock before completing the deduction.</p></details>
+          <details><summary>Transaction did not complete</summary><p>Do not assume the sale was recorded unless MotoPOS displays Transaction Complete. Check the Sales list before retrying to avoid duplicate charging.</p></details>
+          <details><summary>Need more help</summary><p>Open Support Chat and send the exact issue, screenshot/error text, device model and app version.</p></details>
+        </div>
+      `
+    }
+  ];
+
+  app.innerHTML = `
+    <div class="public-shell manual-page">
+      <nav class="public-nav">
+        <a href="#/" class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></a>
+        <div class="nav-actions">
+          <a class="btn btn-secondary" href="#/">Website</a>
+          ${state.session && state.shop ? '<a class="btn btn-primary" href="#/dashboard/overview">Dashboard</a>' : '<a class="btn btn-primary" href="#/login">Sign in</a>'}
+        </div>
+      </nav>
+
+      <section class="manual-hero">
+        <span class="eyebrow">MotoPOS Help Center</span>
+        <h1>App Manual & User Guide</h1>
+        <p>Step-by-step instructions for owners, cashiers, inventory staff, mechanics, managers and MotoPOS administrators.</p>
+        <div class="manual-search-wrap">
+          <input id="manual-search" class="input manual-search" type="search" placeholder="Search manual — e.g. checkout, inventory, trial, staff…" autocomplete="off">
+        </div>
+      </section>
+
+      <div class="manual-layout">
+        <aside class="manual-toc">
+          <strong>Contents</strong>
+          ${sections.map(s=>`<a href="#manual-${s.id}" data-manual-link="${s.id}"><span>${s.eyebrow}</span>${esc(s.title)}</a>`).join("")}
+        </aside>
+
+        <main class="manual-content" id="manual-content">
+          <div class="manual-intro-card">
+            <div>
+              <span class="kicker">Current guide</span>
+              <h2>MotoPOS Android + MotoPOS Cloud</h2>
+              <p>This manual covers the current core workflows. Features may expand as new MotoPOS versions are released.</p>
+            </div>
+            <div class="manual-version">v1.x</div>
+          </div>
+
+          ${sections.map(s=>`
+            <article class="manual-section" id="manual-${s.id}" data-manual-section data-search="${esc((s.title+" "+s.summary).toLowerCase())}">
+              <div class="manual-section-head">
+                <span>${s.eyebrow}</span>
+                <div><h2>${esc(s.title)}</h2><p>${esc(s.summary)}</p></div>
+              </div>
+              <div class="manual-body">${s.body}</div>
+            </article>
+          `).join("")}
+
+          <div id="manual-empty" class="empty" style="display:none"><strong>No matching guide found</strong>Try another keyword such as POS, inventory, license, staff or support.</div>
+        </main>
+      </div>
+
+      <footer class="footer">
+        <span>© 2026 MotoPOS Cloud · App Manual</span>
+        <span><a href="#/manual">Help Center</a> · <a href="#/">MotoPOS Website</a></span>
+      </footer>
+    </div>`;
+
+  const search = document.querySelector("#manual-search");
+  const cards = [...document.querySelectorAll("[data-manual-section]")];
+  const empty = document.querySelector("#manual-empty");
+
+  search?.addEventListener("input", () => {
+    const term = search.value.trim().toLowerCase();
+    let visible = 0;
+    cards.forEach(card => {
+      const haystack = (card.textContent || "").toLowerCase();
+      const show = !term || haystack.includes(term);
+      card.style.display = show ? "" : "none";
+      if (show) visible++;
+    });
+    if (empty) empty.style.display = visible ? "none" : "";
+  });
+
+  document.querySelectorAll("[data-manual-link]").forEach(link => {
+    link.addEventListener("click", event => {
+      event.preventDefault();
+      const id = link.dataset.manualLink;
+      document.querySelector("#manual-" + id)?.scrollIntoView({behavior:"smooth",block:"start"});
+    });
+  });
+}
+
 function renderLanding() {
   app.innerHTML = `
     <div class="public-shell">
       <nav class="public-nav">
         <a href="#/" class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></a>
         <div class="nav-actions">
+          <a class="btn btn-secondary" href="#/manual">App Manual</a>
           <a class="btn btn-secondary" href="#/login">Sign in</a>
           <a class="btn btn-primary" href="#/login?mode=signup">Start free setup</a>
         </div>
@@ -224,6 +485,7 @@ function renderLanding() {
             <div class="hero-actions">
               <a class="btn btn-primary" href="#/login?mode=signup">Start 7-day Pro trial</a>
               <a class="btn btn-secondary" href="#/login">Open dashboard</a>
+              <a class="btn btn-secondary" href="#/manual">Read the app manual</a>
             </div>
             <div class="hero-trust">
               <span><b>Supabase</b> secured data</span>
@@ -279,7 +541,7 @@ function renderLanding() {
         </section>
       </main>
 
-      <footer class="footer"><span>© 2026 MotoPOS Cloud</span><span>Motorcycle parts • Service • POS • Licensing</span></footer>
+      <footer class="footer"><span>© 2026 MotoPOS Cloud</span><span><a href="#/manual">App Manual</a> · Motorcycle parts • Service • POS • Licensing</span></footer>
     </div>`;
 
   loadPublicPlans();
@@ -475,6 +737,7 @@ function renderShell(page) {
         <div class="shop-chip"><strong>${esc(state.shop?.name || "MotoPOS")}</strong><span>${esc(role)}</span></div>
         <nav class="nav-list">
           ${pages.map(p => `<a class="nav-item ${p === page ? "active" : ""}" href="#/dashboard/${p}"><span>${navLabel(p)}</span></a>`).join("")}
+          <a class="nav-item" href="#/manual"><span>App Manual</span><span class="nav-badge">HELP</span></a>
           ${adminLink}
         </nav>
         <div class="sidebar-bottom"><button id="sign-out" class="btn btn-secondary" style="width:100%">Sign out</button></div>
@@ -483,7 +746,7 @@ function renderShell(page) {
       <div class="main">
         <header class="topbar">
           <div class="topbar-title"><strong>${esc(state.shop?.name || "MotoPOS Cloud")}</strong><span>Cloud operations dashboard</span></div>
-          <div class="user-pill"><div class="avatar">${esc((state.user?.email || "M").slice(0,1).toUpperCase())}</div><div class="user-copy"><strong style="font-size:12px">${esc(state.user?.email || "")}</strong><div class="help">${esc(role)}</div></div></div>
+          <div class="toolbar"><a class="btn btn-secondary btn-sm" href="#/manual">Manual</a><div class="user-pill"><div class="avatar">${esc((state.user?.email || "M").slice(0,1).toUpperCase())}</div><div class="user-copy"><strong style="font-size:12px">${esc(state.user?.email || "")}</strong><div class="help">${esc(role)}</div></div></div></div>
         </header>
         <main id="page-content" class="content"><div class="loading-block"></div></main>
       </div>
@@ -1159,6 +1422,7 @@ async function renderAdmin() {
           <a class="nav-item ${section==="clients"?"active":""}" href="#/admin"><span>Clients & Licenses</span><span class="nav-badge">ADMIN</span></a>
           <a class="nav-item ${section==="users"?"active":""}" href="#/admin/users"><span>Users & Emails</span></a>
           <a class="nav-item ${section==="support"?"active":""}" href="#/admin/support"><span>Support Inbox</span></a>
+          <a class="nav-item" href="#/manual"><span>App Manual</span><span class="nav-badge">HELP</span></a>
           ${state.shop ? '<a class="nav-item" href="#/dashboard/overview"><span>My Shop</span></a>' : ""}
         </nav>
         <div class="sidebar-bottom"><button id="admin-sign-out" class="btn btn-secondary" style="width:100%">Sign out</button></div>
@@ -1415,6 +1679,11 @@ async function route() {
 
   if (new URLSearchParams(location.search).get("email-confirmed") === "1") {
     renderEmailVerified();
+    return;
+  }
+
+  if (path === "manual") {
+    renderManual();
     return;
   }
 
