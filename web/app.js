@@ -148,6 +148,29 @@ function friendlyError(error) {
   return raw.split("\n")[0].slice(0, 220);
 }
 
+function setupMotion(scope = document) {
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+
+  const items = scope.querySelectorAll?.(
+    ".section-head, .feature-card, .price-card, .manual-section, .manual-intro-card"
+  ) || [];
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("is-visible");
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -45px 0px" });
+
+  items.forEach(item => {
+    if (item.classList.contains("is-visible") || item.classList.contains("reveal-motion")) return;
+    item.classList.add("reveal-motion");
+    observer.observe(item);
+  });
+}
+
 async function loadAccessContext() {
   state.user = state.session?.user || null;
   state.membership = null;
@@ -546,6 +569,7 @@ function renderLanding() {
       <footer class="footer"><span>© 2026 MotoPOS Cloud</span><span><a href="#/manual">App Manual</a> · Motorcycle parts • Service • POS • Licensing</span></footer>
     </div>`;
 
+  setupMotion();
   loadPublicPlans();
 }
 
@@ -588,6 +612,7 @@ async function loadPublicPlans() {
       </article>
     `;
   }).join("");
+  setupMotion(root);
 }
 
 function renderAuth() {
