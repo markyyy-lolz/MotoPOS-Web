@@ -142,6 +142,7 @@ function friendlyError(error) {
   if (lower.includes("invalid login credentials")) return "Incorrect email or password.";
   if (lower.includes("email not confirmed")) return "Verify your email first, then sign in.";
   if (lower.includes("over_email_send_rate_limit")) return "Please wait about a minute before requesting another verification email.";
+  if (lower.includes("unexpected status code returned from hook: 405")) return "Account creation is temporarily unavailable because the email hook is misconfigured. Please contact MotoPOS Support.";
   if (lower.includes("row-level security") || lower.includes("permission denied")) return "Your account does not have permission for that action.";
   if (lower.includes("network") || lower.includes("fetch")) return "Unable to reach MotoPOS Cloud. Check your internet connection.";
   return raw.split("\n")[0].slice(0, 220);
@@ -373,6 +374,7 @@ function renderManual() {
       body: `
         <div class="manual-faq">
           <details open><summary>Email verification opens localhost</summary><p>Use a newly generated verification email after the MotoPOS redirect URL is configured. Old links may still contain the previous redirect.</p></details>
+          <details><summary>Unexpected status code returned from hook: 405</summary><p>The Supabase Send Email Auth Hook is pointing to a normal website page instead of an email-hook endpoint. Disable that custom hook or configure a valid Send Email Edge Function, then try creating the account again.</p></details>
           <details><summary>Incorrect email or password</summary><p>Confirm the email is verified, then check the exact email/password used for the account.</p></details>
           <details><summary>Trial expired</summary><p>Ask the MotoPOS administrator to issue or renew a license, then press Check License Again.</p></details>
           <details><summary>Device limit reached</summary><p>Deactivate/reset an old device or upgrade the plan's device limit.</p></details>
@@ -559,15 +561,33 @@ async function loadPublicPlans() {
     root.innerHTML = `<div class="empty" style="grid-column:1/-1"><strong>MotoPOS plans</strong>Plan details are available after sign in.</div>`;
     return;
   }
-  root.innerHTML = data.map(plan => `
-    <article class="price-card ${plan.code === "pro" ? "featured" : ""}">
-      <span class="kicker">${esc(plan.code)}</span>
-      <h3>${esc(plan.name)}</h3>
-      <p>${esc(plan.description || "")}</p>
-      <div class="price-meta"><strong>${number(plan.default_max_devices)}</strong> device(s) · ${number(plan.default_max_staff)} staff</div>
-      <a class="btn ${plan.code === "pro" ? "btn-primary" : "btn-secondary"}" href="#/login?mode=signup">Get started</a>
-    </article>
-  `).join("");
+  const pricing = {
+    basic: { monthly: "₱499", annual: "₱4,990/year", note: "Best for small parts shops" },
+    pro: { monthly: "₱999", annual: "₱9,990/year", note: "Best for full motorcycle shops" },
+    business: { monthly: "₱1,799", annual: "₱17,990/year", note: "Best for larger teams" }
+  };
+
+  root.innerHTML = data.map(plan => {
+    const price = pricing[plan.code] || { monthly: "Contact us", annual: "", note: "" };
+    return `
+      <article class="price-card ${plan.code === "pro" ? "featured" : ""}">
+        ${plan.code === "pro" ? '<div class="price-badge">Most popular</div>' : ""}
+        <span class="kicker">${esc(plan.code)}</span>
+        <h3>${esc(plan.name)}</h3>
+        <div class="plan-price"><strong>${price.monthly}</strong>${price.monthly.startsWith("₱") ? "<span>/month</span>" : ""}</div>
+        <div class="plan-annual">${esc(price.annual)}</div>
+        <p>${esc(plan.description || "")}</p>
+        <div class="plan-note">${esc(price.note)}</div>
+        <div class="price-meta">
+          <strong>${number(plan.default_max_devices)}</strong> device(s)
+          <span>·</span>
+          <strong>${number(plan.default_max_staff)}</strong> staff
+        </div>
+        <div class="trial-copy">Includes a free 7-day Pro Trial for new shops.</div>
+        <a class="btn ${plan.code === "pro" ? "btn-primary" : "btn-secondary"}" href="#/login?mode=signup">Start free trial</a>
+      </article>
+    `;
+  }).join("");
 }
 
 function renderAuth() {
