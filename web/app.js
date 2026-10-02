@@ -121,6 +121,21 @@ function navLabel(page) {
   })[page] || page;
 }
 
+async function functionErrorDetails(error) {
+  if (!error) return null;
+  try {
+    const response = error.context;
+    if (response && typeof response.clone === "function") {
+      const cloned = response.clone();
+      const type = cloned.headers?.get?.("content-type") || "";
+      if (type.includes("application/json")) return await cloned.json();
+      const text = await cloned.text();
+      if (text) return { error: text };
+    }
+  } catch (_) {}
+  return null;
+}
+
 function friendlyError(error) {
   const raw = error?.message || String(error || "Something went wrong.");
   const lower = raw.toLowerCase();
@@ -1231,7 +1246,7 @@ async function loadAdminUsers() {
           <td><div class="actions">
             ${u.is_system_admin?'<span class="help">Protected admin</span>':`
               <button class="btn btn-secondary btn-sm user-ban" data-id="${u.id}" data-ban="${banned?"0":"1"}">${banned?"Enable":"Disable"}</button>
-              <button class="btn btn-danger btn-sm user-anonymize" data-id="${u.id}" data-email="${esc(u.email||"")}">Remove Email</button>
+              <button class="btn btn-danger btn-sm user-anonymize" data-id="${u.id}" data-email="${esc(u.email||"")}">Remove Email & Disable</button>
               <button class="btn btn-danger btn-sm user-delete" data-id="${u.id}" data-email="${esc(u.email||"")}">Delete</button>
             `}
           </div></td>
@@ -1252,13 +1267,38 @@ async function loadAdminUsers() {
 
 async function adminUserAction(userId,action){
   const {data,error}=await supabase.functions.invoke("admin-users",{body:{action,user_id:userId}});
-  if(error||data?.error){
-    toast(data?.error||friendlyError(error),"error");
+  const details = error ? await functionErrorDetails(error) : null;
+  const result = data || details;
+
+  if(error || result?.error){
+    if(action==="delete" && result?.can_anonymize){
+      showModal(`
+        <h2>Permanent deletion blocked</h2>
+        <p>This account is linked to existing MotoPOS business history. Permanently deleting the Auth user could break old sales, shop ownership, service records, inventory history or audit logs.</p>
+        ${Array.isArray(result.references) && result.references.length ? `
+          <div class="card danger-zone" style="margin:14px 0">
+            <div class="help"><strong style="color:var(--text)">Linked records</strong><br>${result.references.map(x=>esc(x)).join("<br>")}</div>
+          </div>` : ""}
+        <p><strong>Recommended:</strong> remove the original email and disable the account. Historical transactions stay intact, but the person can no longer sign in.</p>
+        <div class="modal-actions">
+          <button id="cancel-safe-delete" class="btn btn-secondary">Cancel</button>
+          <button id="safe-delete-user" class="btn btn-danger">Remove Email & Disable</button>
+        </div>`);
+      document.querySelector("#cancel-safe-delete")?.addEventListener("click",closeModal);
+      document.querySelector("#safe-delete-user")?.addEventListener("click",async()=>{
+        closeModal();
+        await adminUserAction(userId,"disable_anonymize");
+      });
+      return;
+    }
+
+    toast(result?.error || friendlyError(error),"error");
     return;
   }
+
   toast(
     action==="delete"?"User permanently deleted.":
-    action==="disable_anonymize"?"Original email removed and account disabled.":
+    action==="disable_anonymize"?"Original email removed and account disabled. Business history was preserved.":
     action==="ban"?"User disabled.":"User enabled.",
     "success"
   );
