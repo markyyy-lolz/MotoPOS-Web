@@ -1275,6 +1275,10 @@ async function adminUserAction(userId,action){
       showModal(`
         <h2>Permanent deletion blocked</h2>
         <p>This account is linked to existing MotoPOS business history. Permanently deleting the Auth user could break old sales, shop ownership, service records, inventory history or audit logs.</p>
+        ${Array.isArray(result.last_owner_shops) && result.last_owner_shops.length ? `
+          <div class="card danger-zone" style="margin:14px 0">
+            <div class="help"><strong style="color:var(--text)">Last owner of</strong><br>${result.last_owner_shops.map(x=>esc(x)).join("<br>")}</div>
+          </div>` : ""}
         ${Array.isArray(result.references) && result.references.length ? `
           <div class="card danger-zone" style="margin:14px 0">
             <div class="help"><strong style="color:var(--text)">Linked records</strong><br>${result.references.map(x=>esc(x)).join("<br>")}</div>
