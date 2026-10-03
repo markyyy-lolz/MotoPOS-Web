@@ -381,3 +381,29 @@ table{width:100%;border-collapse:collapse;min-width:700px}th,td{text-align:left;
   .founder-card{grid-template-columns:1fr;padding:22px}
   .founder-mark{width:72px;height:72px;border-radius:20px;font-size:23px}
 }
+
+
+/* MotoPOS customer portal */
+.portal-shell{min-height:100vh;background:
+  radial-gradient(circle at 15% 0%,rgba(37,99,235,.12),transparent 30%),
+  var(--bg);color:var(--text)}
+.portal-header{max-width:1180px;margin:0 auto;padding:22px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.portal-content{max-width:1180px;margin:0 auto;padding:28px 28px 60px}
+.portal-card{width:min(680px,calc(100% - 32px));margin:8vh auto;padding:30px;border:1px solid var(--line);border-radius:26px;background:rgba(10,22,37,.88);box-shadow:0 28px 80px rgba(0,0,0,.28)}
+.portal-error h1{font-size:34px;margin:16px 0 10px}.portal-error p{color:var(--muted);line-height:1.65}
+.portal-hero{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(280px,.6fr);gap:22px;align-items:stretch;margin:12px 0 28px}
+.portal-hero>div:first-child{padding:30px;border:1px solid var(--line);border-radius:26px;background:linear-gradient(160deg,rgba(37,99,235,.12),rgba(255,255,255,.02))}
+.portal-hero h1{font-size:clamp(36px,5vw,56px);letter-spacing:-.05em;margin:8px 0 12px}.portal-hero p{max-width:720px;color:var(--muted);line-height:1.7}
+.portal-wallet{display:grid;grid-template-columns:1fr;gap:12px}
+.portal-wallet>div{border:1px solid rgba(59,130,246,.18);border-radius:22px;padding:24px;background:rgba(59,130,246,.06);display:flex;flex-direction:column;justify-content:center}
+.portal-wallet span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:800}
+.portal-wallet strong{font-size:30px;margin-top:5px}
+.portal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.portal-panel{border:1px solid var(--line);border-radius:22px;padding:20px;background:rgba(255,255,255,.02)}
+.portal-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.portal-panel-head h2{margin:3px 0 0;font-size:20px}
+.portal-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 0;border-top:1px solid var(--line)}
+.portal-row:first-of-type{border-top:0}.portal-row>div{display:flex;flex-direction:column;min-width:0}.portal-row strong{font-size:13px}.portal-row span{font-size:12px;color:var(--muted);margin-top:3px}.portal-row>.pill{flex:0 0 auto;margin:0}
+.portal-contact{display:grid;grid-template-columns:1fr auto;gap:24px;margin-top:18px;padding:24px;border:1px solid var(--line);border-radius:22px;background:rgba(255,255,255,.02)}
+.portal-contact h2{margin:5px 0}.portal-contact p{color:var(--muted);margin:0}.portal-contact>div:last-child{display:flex;gap:24px;align-items:center;color:var(--muted);font-size:13px}
+@media(max-width:820px){.portal-hero,.portal-grid{grid-template-columns:1fr}.portal-contact{grid-template-columns:1fr}.portal-contact>div:last-child{align-items:flex-start;flex-direction:column;gap:8px}}
+@media(max-width:560px){.portal-header,.portal-content{padding-left:16px;padding-right:16px}.portal-hero>div:first-child,.portal-panel{padding:17px}.portal-header .pill{display:none}.portal-panel-head{align-items:flex-start;flex-direction:column}}
