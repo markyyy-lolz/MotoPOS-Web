@@ -1335,25 +1335,42 @@ async function pageOperations(root) {
   });
 }
 
+
 async function pageReports(root) {
-  const [salesRes, expensesRes] = await Promise.all([
-    supabase.from("sales").select("total_amount,status,created_at").eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(1000),
-    supabase.from("expenses").select("amount,expense_date").eq("shop_id",state.shop.id).order("expense_date",{ascending:false}).limit(1000)
+  const [analyticsRes,salesRes] = await Promise.all([
+    supabase.rpc("analytics_summary",{p_shop_id:state.shop.id,p_days:30}),
+    supabase.from("sales").select("sale_number,total_amount,status,created_at").eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(30)
   ]);
-  if (salesRes.error) throw salesRes.error;
-  if (expensesRes.error) throw expensesRes.error;
-  const completed = (salesRes.data||[]).filter(s=>s.status==="completed");
-  const revenue = completed.reduce((sum,s)=>sum+Number(s.total_amount||0),0);
-  const expenses = (expensesRes.data||[]).reduce((sum,e)=>sum+Number(e.amount||0),0);
-  const avg = completed.length ? revenue/completed.length : 0;
+  if(analyticsRes.error) throw analyticsRes.error;
+  if(salesRes.error) throw salesRes.error;
+  const a=analyticsRes.data||{};
+  const revenue=Number(a.revenue||0);
+  const profit=Number(a.gross_profit||0);
+  const expenses=Number(a.expenses||0);
+  const transactions=Number(a.transactions||0);
+  const topProducts=Array.isArray(a.top_products)?a.top_products:[];
 
   root.innerHTML = `
-    ${head("Reports","Current cloud totals from your accessible data")}
+    ${head("Reports","Advanced 30-day business analytics")}
     <section class="metrics">
-      <article class="metric"><div class="metric-label">Revenue</div><div class="metric-value">${money(revenue)}</div><div class="metric-sub">${number(completed.length)} completed sales</div></article>
-      <article class="metric"><div class="metric-label">Expenses</div><div class="metric-value">${money(expenses)}</div><div class="metric-sub">Recorded operating expenses</div></article>
-      <article class="metric"><div class="metric-label">Net</div><div class="metric-value">${money(revenue-expenses)}</div><div class="metric-sub">Revenue minus expenses</div></article>
-      <article class="metric"><div class="metric-label">Average sale</div><div class="metric-value">${money(avg)}</div><div class="metric-sub">Per completed transaction</div></article>
+      <article class="metric"><div class="metric-label">Revenue</div><div class="metric-value">${money(revenue)}</div><div class="metric-sub">Last 30 days</div></article>
+      <article class="metric"><div class="metric-label">Gross profit</div><div class="metric-value">${money(profit)}</div><div class="metric-sub">Sales price minus item cost</div></article>
+      <article class="metric"><div class="metric-label">Operating net</div><div class="metric-value">${money(revenue-expenses)}</div><div class="metric-sub">Revenue minus recorded expenses</div></article>
+      <article class="metric"><div class="metric-label">Average ticket</div><div class="metric-value">${money(a.avg_ticket||0)}</div><div class="metric-sub">${number(transactions)} completed sale(s)</div></article>
+    </section>
+    <section class="grid-2">
+      <div class="card">
+        <div class="card-title"><h3>Top products</h3><span>By units sold</span></div>
+        <div class="stat-list">
+          ${topProducts.map((p,i)=>`<div class="stat-row"><span>#${i+1} · ${esc(p.name)}</span><strong>${number(p.qty)} units · ${money(p.sales)}</strong></div>`).join("")||'<div class="empty"><strong>No product sales yet</strong>Top sellers will appear after completed transactions.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><h3>Recent completed sales</h3><span>Cloud POS</span></div>
+        <div class="stat-list">
+          ${(salesRes.data||[]).filter(s=>s.status==="completed").slice(0,10).map(s=>`<div class="stat-row"><span>${esc(s.sale_number)} · ${niceDate(s.created_at,true)}</span><strong>${money(s.total_amount)}</strong></div>`).join("")||'<div class="empty"><strong>No completed sales</strong>Transactions will appear here.</div>'}
+        </div>
+      </div>
     </section>`;
 }
 
