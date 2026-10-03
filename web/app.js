@@ -240,6 +240,8 @@ function friendlyError(error) {
   if (lower.includes("over_email_send_rate_limit") || lower.includes("email rate limit exceeded")) return "Verification email limit reached. Please try again later. For production sign-ups, MotoPOS needs a custom SMTP email provider.";
   if (lower.includes("unexpected status code returned from hook: 405")) return "Account creation is temporarily unavailable because the email hook is misconfigured. Please contact MotoPOS Support.";
   if (lower.includes("row-level security") || lower.includes("permission denied")) return "Your account does not have permission for that action.";
+  if (lower.includes("email address not authorized")) return "This email cannot receive MotoPOS verification mail from the current Supabase mail provider. Configure custom SMTP for public sign-ups.";
+  if (lower.includes("rate limit") || lower.includes("too many requests")) return "Email sending is temporarily rate-limited. Wait before requesting another verification email.";
   if (lower.includes("network") || lower.includes("fetch")) return "Unable to reach MotoPOS Cloud. Check your internet connection.";
   return raw.split("\n")[0].slice(0, 220);
 }
@@ -818,8 +820,9 @@ function renderAuth() {
             <div class="field"><label>Email address</label><input class="input" type="email" name="email" autocomplete="email" required placeholder="you@example.com"></div>
             <div class="field"><label>Password</label><input class="input" type="password" name="password" autocomplete="${signup ? "new-password" : "current-password"}" minlength="${signup ? 8 : 6}" required placeholder="${signup ? "Minimum 8 characters" : "Your password"}"></div>
             <button class="btn btn-primary" type="submit">${signup ? "Create MotoPOS account" : "Sign in"}</button>
+            <button class="btn btn-secondary" type="button" id="resend-confirmation">Resend verification email</button>
             <a href="#/" class="btn btn-secondary">Back to website</a>
-            ${signup ? '<div class="help">If email verification is enabled, verify your email before signing in.</div>' : ""}
+            <div class="help">Already registered but no email arrived? Enter your email above, then use <strong>Resend verification email</strong>. Check Spam/Junk too.</div>
           </form>
         </div>
       </section>
@@ -833,6 +836,43 @@ function renderAuth() {
     });
   });
   document.querySelector("#auth-form")?.addEventListener("submit", handleAuth);
+  document.querySelector("#resend-confirmation")?.addEventListener("click", resendConfirmation);
+}
+
+async function resendConfirmation() {
+  const form = document.querySelector("#auth-form");
+  const emailInput = form?.querySelector('input[name="email"]');
+  const email = String(emailInput?.value || "").trim();
+  const button = document.querySelector("#resend-confirmation");
+
+  if (!email) {
+    toast("Enter your email address first.", "error");
+    emailInput?.focus();
+    return;
+  }
+
+  const original = button?.textContent || "Resend verification email";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Sending…";
+  }
+
+  try {
+    const { error } = await supabase.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT }
+    });
+    if (error) throw error;
+    toast("Verification email requested. Check Inbox and Spam/Junk.", "success");
+  } catch (error) {
+    toast(friendlyError(error), "error");
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
 }
 
 async function handleAuth(event) {
@@ -865,7 +905,7 @@ async function handleAuth(event) {
         toast("Account created.", "success");
         setHash("dashboard/overview");
       } else {
-        toast("Verification email sent. Verify your account, then sign in.", "success");
+        toast("Verification requested. If no email arrives, use Resend verification email.", "success");
         state.authMode = "signin";
         location.hash = "#/login";
         renderAuth();
