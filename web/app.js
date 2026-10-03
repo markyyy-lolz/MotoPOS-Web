@@ -1222,6 +1222,119 @@ async function pageSuppliers(root) {
     </tbody></table></div>`;
 }
 
+
+async function pageOperations(root) {
+  const shopId = state.shop.id;
+  const managerRole = ["owner","admin","manager"].includes(state.membership.role);
+  const [shiftRes,salesRes,appointmentRes,returnRes,warrantyRes,claimRes] = await Promise.all([
+    supabase.from("cashier_shifts").select("id,user_id,started_at,ended_at,opening_cash,expected_cash,actual_cash,variance,status").eq("shop_id",shopId).order("started_at",{ascending:false}).limit(40),
+    supabase.from("sales").select("id,sale_number,total_amount,status,created_at").eq("shop_id",shopId).order("created_at",{ascending:false}).limit(40),
+    supabase.from("appointments").select("id,customer_name,phone,service_request,scheduled_at,status,source").eq("shop_id",shopId).order("scheduled_at",{ascending:true}).limit(50),
+    supabase.from("sale_returns").select("id,return_number,total_amount,refund_method,reason,created_at").eq("shop_id",shopId).order("created_at",{ascending:false}).limit(20),
+    supabase.from("warranties").select("id,description,warranty_type,status,starts_on,expires_on").eq("shop_id",shopId).order("starts_on",{ascending:false}).limit(50),
+    supabase.from("warranty_claims").select("id,claim_number,issue,status,created_at").eq("shop_id",shopId).order("created_at",{ascending:false}).limit(30)
+  ]);
+  for(const r of [shiftRes,salesRes,appointmentRes,returnRes,warrantyRes,claimRes]) if(r.error) throw r.error;
+
+  const shifts=shiftRes.data||[];
+  const sales=(salesRes.data||[]).filter(s=>s.status==="completed");
+  const appointments=appointmentRes.data||[];
+  const returns=returnRes.data||[];
+  const warranties=warrantyRes.data||[];
+  const claims=claimRes.data||[];
+  const openShift=shifts.find(s=>s.user_id===state.user.id && s.status==="open");
+  const upcoming=appointments.filter(a=>!["completed","cancelled","no_show"].includes(a.status));
+
+  root.innerHTML = `
+    ${head("Operations","Cashier control, manager approvals, after-sales, bookings and warranty",
+      '<div class="actions">'+
+      (managerRole?'<button id="set-manager-pin" class="btn btn-secondary">Manager PIN</button>':'')+
+      '<button id="new-appointment" class="btn btn-primary">New appointment</button></div>'
+    )}
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Your shift</div><div class="metric-value">${openShift?"Open":"Closed"}</div><div class="metric-sub">${openShift?"Opening "+money(openShift.opening_cash):"Start a shift from the Android POS"}</div></article>
+      <article class="metric"><div class="metric-label">Upcoming bookings</div><div class="metric-value">${number(upcoming.length)}</div><div class="metric-sub">Active appointment queue</div></article>
+      <article class="metric"><div class="metric-label">Returns</div><div class="metric-value">${number(returns.length)}</div><div class="metric-sub">Recent refund records</div></article>
+      <article class="metric"><div class="metric-label">Warranty claims</div><div class="metric-value">${number(claims.filter(x=>x.status!=="closed").length)}</div><div class="metric-sub">Open / active claims</div></article>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <div class="card-title"><h3>Appointments</h3><span>Next 12</span></div>
+        <div class="stat-list">
+          ${upcoming.slice(0,12).map(a=>`<div class="stat-row"><span><strong>${esc(a.customer_name||"Customer")}</strong><br>${esc(a.service_request)} · ${niceDate(a.scheduled_at,true)}</span><strong>${pill(a.status)}</strong></div>`).join("")||'<div class="empty"><strong>No bookings</strong>New appointments will appear here.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><h3>Recent returns</h3><span>Protected by manager PIN</span></div>
+        <div class="stat-list">
+          ${returns.slice(0,10).map(r=>`<div class="stat-row"><span>${esc(r.return_number)} · ${esc(r.refund_method)}<br><small>${esc(r.reason)}</small></span><strong>${money(r.total_amount)}</strong></div>`).join("")||'<div class="empty"><strong>No returns</strong>Refund records will appear here.</div>'}
+        </div>
+      </div>
+    </section>
+
+    <div style="height:14px"></div>
+    <section class="grid-2">
+      <div class="card">
+        <div class="card-title"><h3>Warranty coverage</h3><span>${warranties.length} record(s)</span></div>
+        <div class="stat-list">
+          ${warranties.slice(0,10).map(w=>`<div class="stat-row"><span>${esc(w.description)}<br><small>${esc(w.warranty_type)} · ${esc(w.expires_on||"No expiry")}</small></span><strong>${pill(w.status)}</strong></div>`).join("")||'<div class="empty"><strong>No warranties</strong>Warranty records will appear here.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><h3>Recent sales eligible for after-sales</h3><span>Use Android Operations for refund/void</span></div>
+        <div class="stat-list">
+          ${sales.slice(0,10).map(s=>`<div class="stat-row"><span>${esc(s.sale_number)} · ${niceDate(s.created_at,true)}</span><strong>${money(s.total_amount)}</strong></div>`).join("")||'<div class="empty"><strong>No completed sales</strong>Completed POS sales will appear here.</div>'}
+        </div>
+      </div>
+    </section>`;
+
+  document.querySelector("#set-manager-pin")?.addEventListener("click",()=>{
+    showModal(`
+      <h2>Set Manager Approval PIN</h2>
+      <p>Use 4–8 digits. This PIN is required for void and refund approval.</p>
+      <form id="manager-pin-form" class="form">
+        <div class="field"><label>New PIN</label><input class="input" name="pin" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required></div>
+        <div class="field"><label>Confirm PIN</label><input class="input" name="confirm" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required></div>
+        <div class="modal-actions"><button type="button" id="close-manager-pin" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Save PIN</button></div>
+      </form>`);
+    document.querySelector("#close-manager-pin")?.addEventListener("click",closeModal);
+    document.querySelector("#manager-pin-form")?.addEventListener("submit",async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.currentTarget); const pin=String(fd.get("pin")||""); const confirmPin=String(fd.get("confirm")||"");
+      if(pin!==confirmPin) return toast("PIN confirmation does not match.","error");
+      const {error}=await supabase.rpc("set_manager_pin",{p_shop_id:shopId,p_pin:pin});
+      if(error) return toast(friendlyError(error),"error");
+      closeModal(); toast("Manager PIN updated.","success");
+    });
+  });
+
+  document.querySelector("#new-appointment")?.addEventListener("click",()=>{
+    const tomorrow=new Date(Date.now()+86400000); const local=new Date(tomorrow.getTime()-tomorrow.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    showModal(`
+      <h2>New appointment</h2>
+      <form id="appointment-form" class="form">
+        <div class="grid-2"><div class="field"><label>Customer name</label><input class="input" name="name" required></div><div class="field"><label>Phone</label><input class="input" name="phone"></div></div>
+        <div class="field"><label>Service request</label><textarea class="input" name="service" required></textarea></div>
+        <div class="field"><label>Date & time</label><input class="input" type="datetime-local" name="scheduled" value="${local}" required></div>
+        <div class="field"><label>Notes</label><textarea class="input" name="notes"></textarea></div>
+        <div class="modal-actions"><button type="button" id="close-appointment" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Book appointment</button></div>
+      </form>`);
+    document.querySelector("#close-appointment")?.addEventListener("click",closeModal);
+    document.querySelector("#appointment-form")?.addEventListener("submit",async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.currentTarget); const dt=new Date(String(fd.get("scheduled")||""));
+      const {error}=await supabase.from("appointments").insert({
+        shop_id:shopId, customer_name:String(fd.get("name")||"").trim(), phone:String(fd.get("phone")||"").trim()||null,
+        service_request:String(fd.get("service")||"").trim(), scheduled_at:dt.toISOString(), notes:String(fd.get("notes")||"").trim()||null,
+        source:"staff",created_by:state.user.id
+      });
+      if(error) return toast(friendlyError(error),"error");
+      closeModal(); toast("Appointment booked.","success"); await pageOperations(root);
+    });
+  });
+}
+
 async function pageReports(root) {
   const [salesRes, expensesRes] = await Promise.all([
     supabase.from("sales").select("total_amount,status,created_at").eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(1000),
