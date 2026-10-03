@@ -2147,7 +2147,7 @@ async function renderAdmin() {
 async function loadAdminClients() {
   const root = document.querySelector("#admin-content");
   if (!root) return;
-  const { data, error } = await supabase.rpc("admin_client_overview");
+  const { data, error } = await supabase.rpc("admin_client_overview_v2");
   if (error) {
     root.innerHTML = `<div class="empty"><strong>Unable to load clients</strong>${esc(friendlyError(error))}</div>`;
     return;
@@ -2169,7 +2169,7 @@ async function loadAdminClients() {
         <tr>
           <td><strong>${esc(c.shop_name)}</strong><div class="help">${esc(String(c.shop_id).slice(0,8))}…</div></td>
           <td>${esc(c.owner_email||"—")}</td>
-          <td>${c.plan_code?pill(c.plan_code):"—"}</td>
+          <td>${c.plan_code?pill(c.plan_code):"—"}${c.billing_cycle?`<div class="help">${esc(c.billing_cycle)}${c.price_snapshot_php!=null?` · ${peso(c.price_snapshot_php)}`:""}</div>`:""}</td>
           <td>${pill(c.license_status)}${c.license_key_last4?`<div class="help">••••${esc(c.license_key_last4)}</div>`:""}</td>
           <td>${number(c.device_count)}/${c.max_devices??"—"}</td>
           <td>${number(c.member_count)}/${c.max_staff??"—"}</td>
