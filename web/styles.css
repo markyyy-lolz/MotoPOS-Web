@@ -516,3 +516,55 @@ table{width:100%;border-collapse:collapse;min-width:700px}th,td{text-align:left;
 .verify-note{display:flex;flex-direction:column;gap:5px;margin:18px 0;padding:14px 15px;border-radius:16px;background:rgba(59,130,246,.055);border:1px solid rgba(59,130,246,.16)}
 .verify-note strong{font-size:12px;color:var(--text)}
 .verify-note span{font-size:11px;line-height:1.55;color:var(--muted)}
+
+
+/* MotoPOS custom licensing + AI support */
+.ai-support-note{
+  display:flex;align-items:flex-start;gap:14px;margin:0 0 14px;padding:14px 16px;
+  border:1px solid rgba(59,130,246,.18);border-radius:16px;
+  background:linear-gradient(135deg,rgba(59,130,246,.08),rgba(14,165,233,.035));
+}
+.ai-support-note strong{font-size:12px;white-space:nowrap;color:#dbeafe}
+.ai-support-note span{font-size:11px;line-height:1.55;color:var(--muted)}
+.chat-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.chat-bubble.ai{
+  border-color:rgba(139,92,246,.24);
+  background:linear-gradient(145deg,rgba(139,92,246,.11),rgba(59,130,246,.055));
+}
+.chat-bubble.ai small{color:#c4b5fd}
+.custom-license-card{
+  border-color:rgba(139,92,246,.19)!important;
+  background:linear-gradient(145deg,rgba(139,92,246,.055),rgba(17,34,57,.82))!important;
+}
+.custom-order-list{display:flex;flex-direction:column;margin-top:8px}
+.custom-order-row{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;
+  padding:14px 0;border-top:1px solid var(--line)
+}
+.custom-order-row:first-child{border-top:0}
+.custom-order-row>div{display:flex;flex-direction:column;gap:4px}
+.custom-order-row>div:last-child{text-align:right;align-items:flex-end}
+.custom-order-row strong{font-size:12px}
+.custom-order-row span{font-size:10px;color:var(--muted)}
+.feature-picker{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;
+  max-height:250px;overflow:auto;padding:10px;border:1px solid var(--line);
+  border-radius:15px;background:rgba(4,12,23,.45)
+}
+.feature-picker label,.custom-toggle{
+  display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:11px;
+  border:1px solid rgba(148,163,184,.11);background:rgba(255,255,255,.018);
+  color:#d8e3f1;font-size:11px;font-weight:700;cursor:pointer
+}
+.feature-picker label:hover,.custom-toggle:hover{border-color:rgba(59,130,246,.25);background:rgba(59,130,246,.045)}
+.feature-picker input,.custom-toggle input{accent-color:#3b82f6}
+.feature-picker input:disabled+span{opacity:.45}
+.custom-toggle{margin:2px 0 8px}
+.compact-table{box-shadow:none;background:transparent;border:0}
+@media(max-width:680px){
+  .ai-support-note{flex-direction:column;gap:6px}
+  .feature-picker{grid-template-columns:1fr}
+  .custom-order-row{grid-template-columns:1fr}
+  .custom-order-row>div:last-child{text-align:left;align-items:flex-start}
+  .chat-head-actions{width:100%;justify-content:flex-start}
+}

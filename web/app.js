@@ -1928,9 +1928,10 @@ async function pageReports(root) {
     </section>`;
 }
 
+
 async function pageSupport(root) {
   const { data: threads, error } = await supabase.from("support_threads")
-    .select("id,subject,status,priority,last_message_at,created_at")
+    .select("id,subject,status,priority,last_message_at,created_at,ai_enabled,ai_handoff,ai_last_reply_at")
     .eq("shop_id",state.shop.id)
     .order("last_message_at",{ascending:false});
   if(error) throw error;
@@ -1938,10 +1939,11 @@ async function pageSupport(root) {
   if(!state.supportThreadId || !list.some(t=>t.id===state.supportThreadId)) state.supportThreadId=list[0]?.id||null;
 
   root.innerHTML=`
-    ${head("Support Chat","Talk directly with MotoPOS support",'<button id="new-support" class="btn btn-primary">New conversation</button>')}
+    ${head("Support Chat","MotoPOS AI can answer common questions instantly, with human handoff when needed",'<button id="new-support" class="btn btn-primary">New conversation</button>')}
+    <div class="ai-support-note"><strong>MotoPOS AI Assistant</strong><span>Automatic first response for normal troubleshooting. Billing, custom licensing, account/security and developer issues are handed to human support.</span></div>
     <div class="chat-layout">
       <div class="chat-list">
-        ${list.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.subject)}</strong><span>${esc(t.status)} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No conversations</strong>Start a support chat whenever you need help.</div>'}
+        ${list.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.subject)}</strong><span>${esc(t.status)} · ${t.ai_handoff?"human handoff":t.ai_enabled?"AI active":"AI paused"} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No conversations</strong>Start a support chat whenever you need help.</div>'}
       </div>
       <div id="support-chat-panel" class="chat-panel"></div>
     </div>`;
@@ -1954,10 +1956,25 @@ async function pageSupport(root) {
   await renderSupportChatPanel(document.querySelector("#support-chat-panel"),state.supportThreadId,false);
 }
 
+async function invokeAiSupport(threadId) {
+  const {data,error}=await supabase.functions.invoke("support-ai-reply",{body:{thread_id:threadId}});
+  if(error){
+    const details=await functionErrorDetails(error);
+    const message=String(details?.message||details?.error||error?.message||"");
+    if(message.includes("OPENAI_API_KEY") || details?.configured===false){
+      toast("Message sent. AI assistant is not configured yet; human support can still reply.","");
+      return {configured:false};
+    }
+    console.warn("MotoPOS AI Support:",message);
+    return null;
+  }
+  return data||null;
+}
+
 function openNewSupportThread(root) {
   showModal(`
     <h2>New support conversation</h2>
-    <p>Describe what you need help with. Your message will appear in the MotoPOS Developer Support inbox.</p>
+    <p>MotoPOS AI will try to answer common product questions first. Sensitive or account-level requests are automatically handed to human support.</p>
     <form id="new-support-form" class="form">
       <div class="field"><label>Subject</label><input class="input" name="subject" minlength="3" maxlength="160" required placeholder="Example: Printer not connecting"></div>
       <div class="field"><label>Priority</label><select class="input" name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option><option value="low">Low</option></select></div>
@@ -1973,7 +1990,9 @@ function openNewSupportThread(root) {
       created_by:state.user.id,
       subject:String(fd.get("subject")||"").trim(),
       priority:String(fd.get("priority")||"normal"),
-      status:"open"
+      status:"open",
+      ai_enabled:true,
+      ai_handoff:false
     }).select("id").single();
     if(error) return toast(friendlyError(error),"error");
     const msg=await supabase.from("support_messages").insert({
@@ -1985,7 +2004,11 @@ function openNewSupportThread(root) {
     });
     if(msg.error) return toast(friendlyError(msg.error),"error");
     state.supportThreadId=thread.id;
-    closeModal(); toast("Support conversation started.","success"); await pageSupport(root);
+    closeModal();
+    toast("Support conversation started.","success");
+    const ai=await invokeAiSupport(thread.id);
+    if(ai?.handoff) toast("MotoPOS AI handed this conversation to human support.","");
+    await pageSupport(root);
   });
 }
 
@@ -2001,23 +2024,28 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
   }
 
   const [threadRes,messageRes]=await Promise.all([
-    supabase.from("support_threads").select("id,shop_id,subject,status,priority,last_message_at,shop:shops(name)").eq("id",threadId).single(),
-    supabase.from("support_messages").select("id,body,sender_type,created_at,sender_id").eq("thread_id",threadId).order("created_at")
+    supabase.from("support_threads").select("id,shop_id,subject,status,priority,last_message_at,ai_enabled,ai_handoff,ai_last_reply_at,shop:shops(name)").eq("id",threadId).single(),
+    supabase.from("support_messages").select("id,body,sender_type,created_at,sender_id,ai_model").eq("thread_id",threadId).order("created_at")
   ]);
   if(threadRes.error){panel.innerHTML=`<div class="empty"><strong>Unable to load chat</strong>${esc(friendlyError(threadRes.error))}</div>`;return;}
   if(messageRes.error){panel.innerHTML=`<div class="empty"><strong>Unable to load messages</strong>${esc(friendlyError(messageRes.error))}</div>`;return;}
   const t=threadRes.data;
   const messages=messageRes.data||[];
+  const aiState=t.ai_handoff?"Human handoff":t.ai_enabled?"AI active":"AI paused";
 
   panel.innerHTML=`
     <div class="chat-head">
-      <div><strong>${esc(t.subject)}</strong><div class="help">${adminMode?esc(t.shop?.name||"Shop")+" · ":""}${esc(t.priority)} priority · ${esc(t.status)}</div></div>
-      ${adminMode?`<select id="support-status" class="input" style="width:auto;height:38px"><option value="open" ${t.status==="open"?"selected":""}>Open</option><option value="pending" ${t.status==="pending"?"selected":""}>Pending</option><option value="closed" ${t.status==="closed"?"selected":""}>Closed</option></select>`:pill(t.status)}
+      <div><strong>${esc(t.subject)}</strong><div class="help">${adminMode?esc(t.shop?.name||"Shop")+" · ":""}${esc(t.priority)} priority · ${esc(t.status)} · ${esc(aiState)}</div></div>
+      <div class="chat-head-actions">
+        ${adminMode?`<button id="support-ai-toggle" class="btn btn-secondary btn-sm">${t.ai_enabled&&!t.ai_handoff?"Pause AI":"Resume AI"}</button><select id="support-status" class="input" style="width:auto;height:38px"><option value="open" ${t.status==="open"?"selected":""}>Open</option><option value="pending" ${t.status==="pending"?"selected":""}>Pending</option><option value="closed" ${t.status==="closed"?"selected":""}>Closed</option></select>`:pill(t.ai_handoff?"human handoff":t.status)}
+      </div>
     </div>
     <div class="chat-messages" id="support-message-list">
       ${messages.map(m=>{
+        const isAi=m.sender_type==="ai";
         const mine=adminMode?m.sender_type==="support":m.sender_type==="customer";
-        return `<div class="chat-bubble ${mine?"support":""}"><p>${esc(m.body)}</p><small>${m.sender_type==="support"?"MotoPOS Support":adminMode?"Customer":"You"} · ${niceDate(m.created_at,true)}</small></div>`;
+        const label=isAi?"MotoPOS AI":m.sender_type==="support"?"MotoPOS Support":adminMode?"Customer":"You";
+        return `<div class="chat-bubble ${mine?"support":isAi?"ai":""}"><p>${esc(m.body)}</p><small>${esc(label)}${isAi&&m.ai_model?` · ${esc(m.ai_model)}`:""} · ${niceDate(m.created_at,true)}</small></div>`;
       }).join("")||'<div class="empty"><strong>No messages yet</strong>Send the first message below.</div>'}
     </div>
     <form id="support-compose" class="chat-compose">
@@ -2034,6 +2062,17 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
     toast("Support status updated.","success");
   });
 
+  panel.querySelector("#support-ai-toggle")?.addEventListener("click",async()=>{
+    const resume=!t.ai_enabled||t.ai_handoff;
+    const patch=resume
+      ? {ai_enabled:true,ai_handoff:false,status:t.status==="closed"?"open":t.status,updated_at:new Date().toISOString()}
+      : {ai_enabled:false,updated_at:new Date().toISOString()};
+    const {error}=await supabase.from("support_threads").update(patch).eq("id",threadId);
+    if(error) return toast(friendlyError(error),"error");
+    toast(resume?"AI auto-reply resumed.":"AI auto-reply paused.","success");
+    await renderSupportChatPanel(panel,threadId,adminMode);
+  });
+
   panel.querySelector("#support-compose")?.addEventListener("submit",async event=>{
     event.preventDefault();
     const fd=new FormData(event.currentTarget);
@@ -2048,6 +2087,13 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
     });
     if(error) return toast(friendlyError(error),"error");
     event.currentTarget.reset();
+
+    if(adminMode){
+      await supabase.from("support_threads").update({ai_handoff:true,updated_at:new Date().toISOString()}).eq("id",threadId);
+    }else if(t.ai_enabled&&!t.ai_handoff){
+      const ai=await invokeAiSupport(threadId);
+      if(ai?.handoff) toast("MotoPOS AI handed this conversation to human support.","");
+    }
     await renderSupportChatPanel(panel,threadId,adminMode);
   });
 
@@ -2058,30 +2104,40 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
     .subscribe();
 }
 
+
+
 async function pageLicense(root) {
-  const canSeeHistory = ["owner","admin","manager"].includes(state.membership?.role);
-  const [licenseRes, deviceRes, memberRes, historyRes] = await Promise.all([
+  const canManageLicense = ["owner","admin","manager"].includes(state.membership?.role);
+  const [licenseRes, deviceRes, memberRes, historyRes, ordersRes] = await Promise.all([
     supabase.from("shop_licenses")
-      .select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days,billing_cycle,price_snapshot_php")
+      .select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days,billing_cycle,price_snapshot_php,feature_overrides,custom_label")
       .eq("shop_id",state.shop.id).maybeSingle(),
     supabase.from("device_sessions")
       .select("id,device_id,device_name,app_version,last_seen_at,is_active")
       .eq("shop_id",state.shop.id).order("last_seen_at",{ascending:false}),
     supabase.from("shop_members").select("id").eq("shop_id",state.shop.id).eq("is_active",true),
-    canSeeHistory
+    canManageLicense
       ? supabase.from("license_events")
           .select("id,event_type,plan_code,billing_cycle,amount_php,starts_at,expires_at,max_devices,max_staff,details,created_at")
+          .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
+      : Promise.resolve({data:[],error:null}),
+    canManageLicense
+      ? supabase.from("license_order_requests")
+          .select("id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,updated_at")
           .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
       : Promise.resolve({data:[],error:null})
   ]);
   if (licenseRes.error) throw licenseRes.error;
   if (deviceRes.error) throw deviceRes.error;
+  if (historyRes.error) throw historyRes.error;
+  if (ordersRes.error) throw ordersRes.error;
 
   const license = licenseRes.data;
   const ent = state.entitlements || {};
   const devices = (deviceRes.data||[]).filter(d=>d.is_active);
   const staffCount = memberRes.data?.length || 0;
   const history = historyRes.data || [];
+  const orders = ordersRes.data || [];
   const features = entitlementFeatures();
   const trial = license?.status === "trial" ? trialRemaining(license.expires_at) : null;
   const effectiveStatus = ent.status || (
@@ -2095,7 +2151,7 @@ async function pageLicense(root) {
     : `${cycleLabel}${license?.price_snapshot_php != null ? ` · ${peso(license.price_snapshot_php)}` : ""}`;
 
   root.innerHTML = `
-    ${head("License","MotoPOS plan, entitlements, limits and activation status")}
+    ${head("License","MotoPOS plan, entitlements, limits and custom-order requests",canManageLicense?'<button id="request-custom-license" class="btn btn-primary">Request custom plan</button>':"")}
     ${license ? `
       ${license.status === "trial" ? `
         <div class="card" style="margin-bottom:14px;border-color:rgba(59,130,246,.28)">
@@ -2103,14 +2159,14 @@ async function pageLicense(root) {
           <div class="help">
             ${trial?.days > 0
               ? `Your full MotoPOS Pro trial is active. <strong style="color:var(--text)">${esc(trial.label)}</strong>. No license key is required during the trial.`
-              : "Your MotoPOS trial has expired. Choose a paid plan to continue licensed shop operations."}
+              : "Your MotoPOS trial has expired. Choose a paid plan or request a custom build."}
           </div>
         </div>
       ` : ""}
       <section class="metrics">
         <article class="metric">
           <div class="metric-label">Plan</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.plan_code || "—")}</div>
+          <div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.custom_label || license.plan_code || "—")}</div>
           <div class="metric-sub">${esc(billing)}</div>
         </article>
         <article class="metric">
@@ -2130,37 +2186,113 @@ async function pageLicense(root) {
             : '<span class="help">Licensed modules are unavailable until the plan is active.</span>'}
         </div>
       </div>
-
-      <div class="card" style="margin-top:14px">
-        <div class="card-title"><h3>${license.status === "trial" ? "Trial rules" : "License security"}</h3></div>
-        <div class="help">
-          ${license.status === "trial"
-            ? "The trial starts automatically for a new shop and provides Pro entitlements for 7 days. A paid license replaces the trial."
-            : "MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when a MotoPOS administrator issues or renews the license."}
-        </div>
-      </div>
-
-      ${canSeeHistory ? `
-        <div class="card" style="margin-top:14px">
-          <div class="card-title"><h3>License history</h3><span class="help">Latest ${history.length} event(s)</span></div>
-          <div class="stat-list">
-            ${history.length ? history.map(event => `
-              <div class="stat-row">
-                <span>
-                  <strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong>
-                  <small>${niceDate(event.created_at,true)}</small>
-                </span>
-                <strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong>
-              </div>
-            `).join("") : '<div class="help">No paid license events yet.</div>'}
-          </div>
-        </div>
-      ` : ""}
     ` : `
       <div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>
     `}
+
+    ${canManageLicense ? `
+      <div class="card custom-license-card" style="margin-top:14px">
+        <div class="card-title"><div><h3>Custom License Orders</h3><span>Build a plan around your shop instead of forcing fixed limits.</span></div><button id="request-custom-license-card" class="btn btn-secondary btn-sm">New custom order</button></div>
+        <div class="custom-order-list">
+          ${orders.length ? orders.map(order=>`
+            <div class="custom-order-row">
+              <div><strong>${esc(order.requested_plan)} · ${esc(order.billing_cycle)}</strong><span>${number(order.desired_devices)} devices · ${number(order.desired_staff)} staff · ${Array.isArray(order.desired_features)?order.desired_features.length:0} modules</span></div>
+              <div><strong>${order.quoted_price_php!=null?peso(order.quoted_price_php):order.budget_php!=null?`Budget ${peso(order.budget_php)}`:"Awaiting quote"}</strong><span>${pill(order.status)} · ${niceDate(order.created_at,true)}</span></div>
+            </div>
+          `).join(""):'<div class="help">No custom orders yet. Request a tailored combination of modules, devices, staff limits and billing term.</div>'}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="card-title"><h3>License history</h3><span class="help">Latest ${history.length} event(s)</span></div>
+        <div class="stat-list">
+          ${history.length ? history.map(event => `
+            <div class="stat-row">
+              <span>
+                <strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong>
+                <small>${niceDate(event.created_at,true)}</small>
+              </span>
+              <strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong>
+            </div>
+          `).join("") : '<div class="help">No paid license events yet.</div>'}
+        </div>
+      </div>
+    ` : ""}
   `;
+
+  const openRequest=()=>openCustomLicenseRequest(root);
+  document.querySelector("#request-custom-license")?.addEventListener("click",openRequest);
+  document.querySelector("#request-custom-license-card")?.addEventListener("click",openRequest);
 }
+
+async function openCustomLicenseRequest(root) {
+  const {data:plans,error}=await supabase.from("license_plans")
+    .select("code,name,default_max_devices,default_max_staff,features,sort_order")
+    .eq("is_active",true).order("sort_order");
+  if(error||!plans?.length) return toast(friendlyError(error||new Error("No active plans found.")),"error");
+
+  const planMap=Object.fromEntries(plans.map(p=>[p.code,p]));
+  const allFeatures=[...new Set(plans.flatMap(p=>Array.isArray(p.features)?p.features:[]))];
+
+  showModal(`
+    <h2>Request a custom MotoPOS license</h2>
+    <p>Choose a base plan, then customize modules, device/staff limits, term and target budget. MotoPOS will review the request and send a quote.</p>
+    <form id="custom-license-request-form" class="form">
+      <div class="grid-2">
+        <div class="field"><label>Base plan</label><select class="input" name="plan" id="custom-order-plan">${plans.map(p=>`<option value="${esc(p.code)}" ${p.code==="pro"?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
+        <div class="field"><label>Billing term</label><select class="input" name="cycle"><option value="monthly">Monthly</option><option value="annual" selected>Annual</option><option value="custom">Custom term</option></select></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>Devices needed</label><input class="input" type="number" min="1" max="500" name="devices" id="custom-order-devices" required></div>
+        <div class="field"><label>Staff accounts needed</label><input class="input" type="number" min="1" max="5000" name="staff" id="custom-order-staff" required></div>
+      </div>
+      <div class="field"><label>Target budget (₱, optional)</label><input class="input" type="number" min="0" step="0.01" name="budget" placeholder="Tell us your preferred budget"></div>
+      <div class="field"><label>Modules</label><div class="feature-picker" id="custom-order-features">
+        ${allFeatures.map(code=>`<label><input type="checkbox" name="feature" value="${esc(code)}"><span>${esc(featureLabel(code))}</span></label>`).join("")}
+      </div></div>
+      <div class="field"><label>Special requirements</label><textarea class="input" name="notes" maxlength="4000" placeholder="Example: 5 POS tablets, 15 staff, service + inventory + multi-branch only, custom annual billing…"></textarea></div>
+      <div class="modal-actions"><button type="button" id="close-custom-order" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Submit custom order</button></div>
+    </form>`);
+
+  const planSelect=document.querySelector("#custom-order-plan");
+  const deviceInput=document.querySelector("#custom-order-devices");
+  const staffInput=document.querySelector("#custom-order-staff");
+  function applyPlan(){
+    const p=planMap[planSelect?.value]||plans[0];
+    if(deviceInput) deviceInput.value=p.default_max_devices;
+    if(staffInput) staffInput.value=p.default_max_staff;
+    const selected=new Set(Array.isArray(p.features)?p.features:[]);
+    document.querySelectorAll('#custom-order-features input[name="feature"]').forEach(el=>{el.checked=selected.has(el.value);});
+  }
+  planSelect?.addEventListener("change",applyPlan);
+  applyPlan();
+
+  document.querySelector("#close-custom-order")?.addEventListener("click",closeModal);
+  document.querySelector("#custom-license-request-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const features=[...event.currentTarget.querySelectorAll('input[name="feature"]:checked')].map(x=>x.value);
+    const budgetRaw=String(fd.get("budget")||"").trim();
+    const {error}=await supabase.from("license_order_requests").insert({
+      shop_id:state.shop.id,
+      requested_by:state.user.id,
+      status:"pending",
+      requested_plan:String(fd.get("plan")||"pro"),
+      billing_cycle:String(fd.get("cycle")||"annual"),
+      desired_devices:Number(fd.get("devices")||1),
+      desired_staff:Number(fd.get("staff")||1),
+      desired_features:features,
+      budget_php:budgetRaw?Number(budgetRaw):null,
+      notes:String(fd.get("notes")||"").trim()||null
+    });
+    if(error) return toast(friendlyError(error),"error");
+    closeModal();
+    toast("Custom license request submitted.","success");
+    await pageLicense(root);
+  });
+}
+
+
 async function pageDevices(root) {
   const { data, error } = await supabase.from("device_sessions")
     .select("id,device_id,device_name,app_version,last_seen_at,is_active,created_at")
@@ -2241,26 +2373,57 @@ async function renderAdmin() {
   else await loadAdminClients();
 }
 
+
 async function loadAdminClients() {
   const root = document.querySelector("#admin-content");
   if (!root) return;
-  const { data, error } = await supabase.rpc("admin_client_overview_v2");
-  if (error) {
-    root.innerHTML = `<div class="empty"><strong>Unable to load clients</strong>${esc(friendlyError(error))}</div>`;
+
+  const [clientRes,orderRes]=await Promise.all([
+    supabase.rpc("admin_client_overview_v2"),
+    supabase.from("license_order_requests")
+      .select("id,shop_id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,shop:shops(name)")
+      .order("created_at",{ascending:false})
+      .limit(100)
+  ]);
+
+  if (clientRes.error) {
+    root.innerHTML = `<div class="empty"><strong>Unable to load clients</strong>${esc(friendlyError(clientRes.error))}</div>`;
     return;
   }
-  const clients = data || [];
+  if(orderRes.error){
+    root.innerHTML = `<div class="empty"><strong>Unable to load custom license orders</strong>${esc(friendlyError(orderRes.error))}</div>`;
+    return;
+  }
+
+  const clients = clientRes.data || [];
+  const orders = orderRes.data || [];
   const active = clients.filter(c=>["active","trial"].includes(c.license_status)).length;
   const devices = clients.reduce((sum,c)=>sum+Number(c.device_count||0),0);
+  const openOrders=orders.filter(o=>!["fulfilled","declined","cancelled"].includes(o.status));
 
   root.innerHTML = `
-    ${head("Clients & Licenses","Central control for MotoPOS shops, plans and devices")}
+    ${head("Clients & Licenses","Central control for MotoPOS shops, fixed plans and custom license orders")}
     <section class="metrics">
       <article class="metric"><div class="metric-label">Client shops</div><div class="metric-value">${number(clients.length)}</div><div class="metric-sub">Registered workspaces</div></article>
       <article class="metric"><div class="metric-label">Active licenses</div><div class="metric-value">${number(active)}</div><div class="metric-sub">Active or trial</div></article>
       <article class="metric"><div class="metric-label">Active devices</div><div class="metric-value">${number(devices)}</div><div class="metric-sub">Across all clients</div></article>
-      <article class="metric"><div class="metric-label">Unlicensed</div><div class="metric-value">${number(clients.filter(c=>c.license_status==="unlicensed").length)}</div><div class="metric-sub">Awaiting a license</div></article>
+      <article class="metric"><div class="metric-label">Custom orders</div><div class="metric-value">${number(openOrders.length)}</div><div class="metric-sub">Need review / quote</div></article>
     </section>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title"><h3>Custom license orders</h3><span>Tailored modules, limits and pricing</span></div>
+      <div class="table-wrap compact-table"><table><thead><tr><th>Shop</th><th>Request</th><th>Modules</th><th>Budget / quote</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+        ${orders.map(o=>`<tr>
+          <td><strong>${esc(o.shop?.name||"Shop")}</strong><div class="help">${niceDate(o.created_at,true)}</div></td>
+          <td>${esc(o.requested_plan)} · ${esc(o.billing_cycle)}<div class="help">${number(o.desired_devices)} devices · ${number(o.desired_staff)} staff</div></td>
+          <td>${Array.isArray(o.desired_features)?number(o.desired_features.length):0}<div class="help">${Array.isArray(o.desired_features)?esc(o.desired_features.slice(0,3).map(featureLabel).join(", ")):""}${Array.isArray(o.desired_features)&&o.desired_features.length>3?"…":""}</div></td>
+          <td>${o.quoted_price_php!=null?`<strong>${peso(o.quoted_price_php)}</strong>`:o.budget_php!=null?`Budget ${peso(o.budget_php)}`:"—"}</td>
+          <td>${pill(o.status)}</td>
+          <td><div class="actions"><button class="btn btn-secondary btn-sm review-custom-order" data-id="${o.id}">Review</button>${!["fulfilled","declined","cancelled"].includes(o.status)?`<button class="btn btn-primary btn-sm issue-custom-order" data-id="${o.id}">Issue</button>`:""}</div></td>
+        </tr>`).join("")||'<tr><td colspan="6">No custom license orders yet.</td></tr>'}
+      </tbody></table></div>
+    </div>
+
     <div class="table-wrap"><table><thead><tr><th>Shop</th><th>Owner</th><th>Plan</th><th>License</th><th>Devices</th><th>Staff</th><th>Expires</th><th>Actions</th></tr></thead><tbody>
       ${clients.map(c=>`
         <tr>
@@ -2282,7 +2445,57 @@ async function loadAdminClients() {
   root.querySelectorAll(".issue-license").forEach(btn=>btn.addEventListener("click",()=>openLicenseModal(btn.dataset.shop,btn.dataset.name)));
   root.querySelectorAll(".status-license").forEach(btn=>btn.addEventListener("click",()=>setLicenseStatus(btn.dataset.shop,btn.dataset.status)));
   root.querySelectorAll(".reset-devices").forEach(btn=>btn.addEventListener("click",()=>resetDevices(btn.dataset.shop)));
+  root.querySelectorAll(".review-custom-order").forEach(btn=>{
+    const order=orders.find(o=>o.id===btn.dataset.id);
+    btn.addEventListener("click",()=>openCustomOrderReview(order));
+  });
+  root.querySelectorAll(".issue-custom-order").forEach(btn=>{
+    const order=orders.find(o=>o.id===btn.dataset.id);
+    btn.addEventListener("click",()=>openLicenseModal(order.shop_id,order.shop?.name||"Shop",order));
+  });
 }
+
+function openCustomOrderReview(order){
+  if(!order) return;
+  const features=Array.isArray(order.desired_features)?order.desired_features:[];
+  showModal(`
+    <h2>Review custom license order</h2>
+    <p><strong>${esc(order.shop?.name||"Shop")}</strong> requested ${number(order.desired_devices)} devices, ${number(order.desired_staff)} staff accounts and ${number(features.length)} modules.</p>
+    <div class="entitlement-grid compact">${features.map(code=>`<span class="entitlement-chip">✓ ${esc(featureLabel(code))}</span>`).join("")||'<span class="help">No custom modules selected.</span>'}</div>
+    ${order.notes?`<div class="verify-note"><strong>Client notes</strong><span>${esc(order.notes)}</span></div>`:""}
+    <form id="custom-order-review-form" class="form">
+      <div class="grid-2">
+        <div class="field"><label>Status</label><select class="input" name="status">${["pending","reviewing","quoted","approved","declined","fulfilled","cancelled"].map(s=>`<option value="${s}" ${order.status===s?"selected":""}>${s}</option>`).join("")}</select></div>
+        <div class="field"><label>Quoted price (₱)</label><input class="input" type="number" min="0" step="0.01" name="quote" value="${esc(order.quoted_price_php??"")}" placeholder="Optional until quoted"></div>
+      </div>
+      <div class="field"><label>Admin notes</label><textarea class="input" name="admin_notes" maxlength="4000">${esc(order.admin_notes||"")}</textarea></div>
+      <div class="modal-actions"><button type="button" id="close-order-review" class="btn btn-secondary">Close</button><button type="button" id="issue-order-now" class="btn btn-secondary">Issue custom license</button><button type="submit" class="btn btn-primary">Save review</button></div>
+    </form>`);
+
+  document.querySelector("#close-order-review")?.addEventListener("click",closeModal);
+  document.querySelector("#issue-order-now")?.addEventListener("click",()=>{
+    closeModal();
+    openLicenseModal(order.shop_id,order.shop?.name||"Shop",order);
+  });
+  document.querySelector("#custom-order-review-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const quoteRaw=String(fd.get("quote")||"").trim();
+    const {error}=await supabase.from("license_order_requests").update({
+      status:String(fd.get("status")||"reviewing"),
+      quoted_price_php:quoteRaw?Number(quoteRaw):null,
+      admin_notes:String(fd.get("admin_notes")||"").trim()||null,
+      reviewed_by:state.user.id,
+      reviewed_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()
+    }).eq("id",order.id);
+    if(error) return toast(friendlyError(error),"error");
+    closeModal();
+    toast("Custom order updated.","success");
+    await loadAdminClients();
+  });
+}
+
 
 async function loadAdminUsers() {
   const root=document.querySelector("#admin-content");
@@ -2376,7 +2589,7 @@ async function loadAdminSupport() {
   const root=document.querySelector("#admin-content");
   if(!root) return;
   const {data,error}=await supabase.from("support_threads")
-    .select("id,shop_id,subject,status,priority,last_message_at,created_at,shop:shops(name)")
+    .select("id,shop_id,subject,status,priority,last_message_at,created_at,ai_enabled,ai_handoff,shop:shops(name)")
     .order("last_message_at",{ascending:false})
     .limit(200);
   if(error){
@@ -2394,7 +2607,7 @@ async function loadAdminSupport() {
       <article class="metric"><div class="metric-label">Closed</div><div class="metric-value">${number(threads.filter(t=>t.status==="closed").length)}</div><div class="metric-sub">Resolved conversations</div></article>
     </section>
     <div class="chat-layout">
-      <div class="chat-list">${threads.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.shop?.name||"Shop")} · ${esc(t.subject)}</strong><span>${esc(t.priority)} · ${esc(t.status)} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No support requests</strong>Client chats will appear here.</div>'}</div>
+      <div class="chat-list">${threads.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.shop?.name||"Shop")} · ${esc(t.subject)}</strong><span>${esc(t.priority)} · ${esc(t.status)} · ${t.ai_handoff?"human":t.ai_enabled?"AI":"manual"} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No support requests</strong>Client chats will appear here.</div>'}</div>
       <div id="admin-support-panel" class="chat-panel"></div>
     </div>`;
   root.querySelectorAll(".chat-thread").forEach(btn=>btn.addEventListener("click",async()=>{
@@ -2404,7 +2617,8 @@ async function loadAdminSupport() {
   await renderSupportChatPanel(document.querySelector("#admin-support-panel"),state.supportThreadId,true);
 }
 
-async function openLicenseModal(shopId, shopName) {
+
+async function openLicenseModal(shopId, shopName, order = null) {
   const { data: plans, error } = await supabase
     .from("license_plans")
     .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
@@ -2417,28 +2631,42 @@ async function openLicenseModal(shopId, shopName) {
   }
 
   const planMap = Object.fromEntries(plans.map(plan => [plan.code, plan]));
+  const initialPlan=planMap[order?.requested_plan]?order.requested_plan:(planMap.pro?"pro":plans[0].code);
+  const allFeatures=[...new Set(plans.flatMap(p=>Array.isArray(p.features)?p.features:[]))];
+  const initialFeatures=new Set(order&&Array.isArray(order.desired_features)?order.desired_features:(planMap[initialPlan]?.features||[]));
+  const initialCycle=order?.billing_cycle||"annual";
+
   showModal(`
-    <h2>Issue / renew MotoPOS license</h2>
-    <p>${esc(shopName)} · Plan defaults load automatically. Device and staff limits can still be overridden for special contracts.</p>
+    <h2>${order?"Issue custom MotoPOS license":"Issue / renew MotoPOS license"}</h2>
+    <p>${esc(shopName)} · ${order?"This form is prefilled from the client's custom order. Review before generating the key.":"Plan defaults load automatically. You can enable custom feature overrides for special contracts."}</p>
     <form id="license-form" class="form">
       <input type="hidden" name="shop_id" value="${esc(shopId)}">
+      <input type="hidden" name="order_request_id" value="${esc(order?.id||"")}">
       <div class="grid-2">
-        <div class="field"><label>Plan</label><select class="input" name="plan" id="license-plan">
-          ${plans.map(plan => `<option value="${esc(plan.code)}" ${plan.code==="pro"?"selected":""}>${esc(plan.name)}</option>`).join("")}
+        <div class="field"><label>Base plan</label><select class="input" name="plan" id="license-plan">
+          ${plans.map(plan => `<option value="${esc(plan.code)}" ${plan.code===initialPlan?"selected":""}>${esc(plan.name)}</option>`).join("")}
         </select></div>
         <div class="field"><label>Billing cycle</label><select class="input" name="cycle" id="license-cycle">
-          <option value="monthly">Monthly</option>
-          <option value="annual" selected>Annual</option>
-          <option value="custom">Custom term</option>
+          <option value="monthly" ${initialCycle==="monthly"?"selected":""}>Monthly</option>
+          <option value="annual" ${initialCycle==="annual"?"selected":""}>Annual</option>
+          <option value="custom" ${initialCycle==="custom"?"selected":""}>Custom term</option>
         </select></div>
       </div>
       <div id="license-plan-preview" class="license-plan-preview"></div>
-      <div class="field"><label>Expiration date</label><input class="input" type="date" name="expires" id="license-expires"></div>
+      <div class="field"><label>Custom plan label (optional)</label><input class="input" name="custom_label" value="${esc(order?`Custom ${shopName}`:"")}" placeholder="Example: MotoPOS Custom Business"></div>
       <div class="grid-2">
-        <div class="field"><label>Max devices</label><input class="input" type="number" min="1" name="devices" id="license-devices"></div>
-        <div class="field"><label>Max staff</label><input class="input" type="number" min="1" name="staff" id="license-staff"></div>
+        <div class="field"><label>Expiration date</label><input class="input" type="date" name="expires" id="license-expires"></div>
+        <div class="field"><label>Contract price (₱, optional)</label><input class="input" type="number" min="0" step="0.01" name="custom_price" value="${esc(order?.quoted_price_php??"")}" placeholder="Uses plan price if blank"></div>
       </div>
-      <div class="help">Changing the plan resets limits to that plan's defaults. Manual changes are treated as administrator overrides.</div>
+      <div class="grid-2">
+        <div class="field"><label>Max devices</label><input class="input" type="number" min="1" name="devices" id="license-devices" value="${esc(order?.desired_devices??"")}"></div>
+        <div class="field"><label>Max staff</label><input class="input" type="number" min="1" name="staff" id="license-staff" value="${esc(order?.desired_staff??"")}"></div>
+      </div>
+      <label class="custom-toggle"><input type="checkbox" id="license-use-custom-features" name="use_custom_features" ${order?"checked":""}><span>Use custom module selection for this license</span></label>
+      <div class="feature-picker" id="license-feature-picker">
+        ${allFeatures.map(code=>`<label><input type="checkbox" name="license_feature" value="${esc(code)}" ${initialFeatures.has(code)?"checked":""} ${order?"":"disabled"}><span>${esc(featureLabel(code))}</span></label>`).join("")}
+      </div>
+      <div class="help">Custom feature overrides are stored on this license only. The base plan remains for compatibility, pricing defaults and offline-grace rules.</div>
       <div class="modal-actions"><button type="button" id="close-license" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Generate license</button></div>
     </form>`);
 
@@ -2448,14 +2676,22 @@ async function openLicenseModal(shopId, shopName) {
   const devicesInput = document.querySelector("#license-devices");
   const staffInput = document.querySelector("#license-staff");
   const preview = document.querySelector("#license-plan-preview");
+  const useCustom=document.querySelector("#license-use-custom-features");
+  const featureInputs=[...document.querySelectorAll('#license-feature-picker input[name="license_feature"]')];
 
-  function refreshPlan(resetLimits = false) {
+  function applyFeatureSet(features){
+    const set=new Set(features||[]);
+    featureInputs.forEach(input=>{input.checked=set.has(input.value);});
+  }
+
+  function refreshPlan(resetLimits = false, resetFeatures = false) {
     const plan = planMap[planSelect?.value] || plans[0];
     const cycle = cycleSelect?.value || "annual";
     if (resetLimits) {
       if (devicesInput) devicesInput.value = plan.default_max_devices;
       if (staffInput) staffInput.value = plan.default_max_staff;
     }
+    if (resetFeatures && !useCustom?.checked) applyFeatureSet(plan.features||[]);
     if (expiresInput && cycle !== "custom") expiresInput.value = recommendedLicenseDate(cycle);
 
     const price = cycle === "monthly"
@@ -2472,11 +2708,21 @@ async function openLicenseModal(shopId, shopName) {
     `;
   }
 
-  planSelect?.addEventListener("change",()=>refreshPlan(true));
-  cycleSelect?.addEventListener("change",()=>refreshPlan(false));
+  planSelect?.addEventListener("change",()=>refreshPlan(true,true));
+  cycleSelect?.addEventListener("change",()=>refreshPlan(false,false));
+  useCustom?.addEventListener("change",()=>{
+    featureInputs.forEach(input=>input.disabled=!useCustom.checked);
+    if(!useCustom.checked) applyFeatureSet(planMap[planSelect?.value]?.features||[]);
+  });
   document.querySelector("#close-license")?.addEventListener("click",closeModal);
   document.querySelector("#license-form")?.addEventListener("submit",issueLicense);
-  refreshPlan(true);
+  refreshPlan(!order,false);
+  if(order){
+    if(devicesInput) devicesInput.value=order.desired_devices;
+    if(staffInput) staffInput.value=order.desired_staff;
+    applyFeatureSet(order.desired_features||[]);
+    featureInputs.forEach(input=>input.disabled=false);
+  }
 }
 
 async function issueLicense(event) {
@@ -2487,14 +2733,24 @@ async function issueLicense(event) {
   const expiresRaw = String(f.get("expires")||"");
   const expiresAt = expiresRaw ? new Date(expiresRaw+"T23:59:59+08:00").toISOString() : null;
   const cycle = String(f.get("cycle")||"annual");
+  const useCustom=Boolean(event.currentTarget.querySelector("#license-use-custom-features")?.checked);
+  const featureOverrides=useCustom
+    ? [...event.currentTarget.querySelectorAll('input[name="license_feature"]:checked')].map(x=>x.value)
+    : null;
+  const customPriceRaw=String(f.get("custom_price")||"").trim();
+  const orderId=String(f.get("order_request_id")||"").trim();
 
-  const { data, error } = await supabase.rpc("admin_issue_license_v2", {
+  const { data, error } = await supabase.rpc("admin_issue_license_v3", {
     p_shop_id:String(f.get("shop_id")),
     p_plan_code:String(f.get("plan")),
     p_billing_cycle:cycle,
     p_expires_at:expiresAt,
     p_max_devices:Number(f.get("devices"))||null,
-    p_max_staff:Number(f.get("staff"))||null
+    p_max_staff:Number(f.get("staff"))||null,
+    p_feature_overrides:featureOverrides,
+    p_custom_price_php:customPriceRaw?Number(customPriceRaw):null,
+    p_custom_label:String(f.get("custom_label")||"").trim()||null,
+    p_order_request_id:orderId||null
   });
 
   if (error) {
@@ -2507,10 +2763,11 @@ async function issueLicense(event) {
     <p>Copy this key now. MotoPOS stores only its cryptographic hash, so the full key is not retrievable later.</p>
     <div class="key-box" id="issued-key">${esc(result.license_key||"")}</div>
     <div class="stat-list" style="margin-top:13px">
-      <div class="stat-row"><span>Plan</span><strong>${esc(result.plan_name||result.plan_code||"")}</strong></div>
+      <div class="stat-row"><span>Plan</span><strong>${esc(result.plan_name||result.plan_code||"")}${result.custom?" · Custom":""}</strong></div>
       <div class="stat-row"><span>Billing</span><strong>${esc(result.billing_cycle||"")}${result.amount_php!=null?` · ${peso(result.amount_php)}`:""}</strong></div>
       <div class="stat-row"><span>Devices</span><strong>${esc(result.max_devices||"")}</strong></div>
       <div class="stat-row"><span>Staff</span><strong>${esc(result.max_staff||"")}</strong></div>
+      <div class="stat-row"><span>Modules</span><strong>${Array.isArray(result.features)?number(result.features.length):0}</strong></div>
       <div class="stat-row"><span>Offline grace</span><strong>${esc(result.offline_grace_days||"")} days</strong></div>
       <div class="stat-row"><span>Expires</span><strong>${niceDate(result.expires_at)}</strong></div>
     </div>
@@ -2521,6 +2778,7 @@ async function issueLicense(event) {
   });
   document.querySelector("#done-key")?.addEventListener("click",async()=>{closeModal();await loadAdminClients();});
 }
+
 
 async function setLicenseStatus(shopId, status) {
   if (!confirm(`${status==="suspended"?"Suspend":"Reactivate"} this MotoPOS license?`)) return;
