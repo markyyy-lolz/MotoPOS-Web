@@ -934,14 +934,16 @@ function renderSetup() {
     await supabase.auth.signOut();
     state.session = state.user = state.membership = state.shop = null;
     state.isSystemAdmin = false;
+    state.entitlements = null;
     setHash("login");
   });
 }
 
 function renderShell(page) {
   const role = state.membership?.role || "staff";
-  const pages = rolePages(role);
-  if (!pages.includes(page)) page = "overview";
+  const roleAllowedPages = rolePages(role);
+  const pages = planPagesForRole(role);
+  if (!roleAllowedPages.includes(page)) page = "overview";
 
   const adminLink = state.isSystemAdmin
     ? `<a class="nav-item ${currentPath() === "admin" ? "active" : ""}" href="#/admin"><span>Developer Control</span><span class="nav-badge">ADMIN</span></a>`
@@ -951,7 +953,7 @@ function renderShell(page) {
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></div>
-        <div class="shop-chip"><strong>${esc(state.shop?.name || "MotoPOS")}</strong><span>${esc(role)}</span></div>
+        <div class="shop-chip"><strong>${esc(state.shop?.name || "MotoPOS")}</strong><span>${esc(role)} · ${esc(state.entitlements?.plan_name || state.entitlements?.status || "No plan")}</span></div>
         <nav class="nav-list">
           ${pages.map(p => `<a class="nav-item ${p === page ? "active" : ""}" href="#/dashboard/${p}"><span>${navLabel(p)}</span></a>`).join("")}
           <a class="nav-item" href="#/manual"><span>App Manual</span><span class="nav-badge">HELP</span></a>
@@ -978,6 +980,7 @@ function renderShell(page) {
     await supabase.auth.signOut();
     state.session = state.user = state.membership = state.shop = null;
     state.isSystemAdmin = false;
+    state.entitlements = null;
     setHash("");
   });
 
@@ -987,6 +990,10 @@ function renderShell(page) {
 async function loadDashboardPage(page) {
   const root = document.querySelector("#page-content");
   if (!root || !state.shop) return;
+  if (!planAllowsPage(page)) {
+    renderPlanLocked(root, page);
+    return;
+  }
   try {
     switch (page) {
       case "overview": return await pageOverview(root);
