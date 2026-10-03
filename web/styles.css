@@ -508,3 +508,11 @@ table{width:100%;border-collapse:collapse;min-width:700px}th,td{text-align:left;
 .license-plan-preview span{font-size:11px;color:var(--muted);line-height:1.45}
 .stat-row span small{display:block;margin-top:3px;color:var(--muted);font-size:10px}
 @media(max-width:620px){.license-plan-preview{grid-template-columns:1fr}}
+
+
+/* Scanner-safe email confirmation */
+.email-confirm-card{max-width:560px;text-align:left}
+.verify-shield{width:62px;height:62px;border-radius:20px;display:grid;place-items:center;margin:18px 0 16px;background:rgba(34,197,94,.09);border:1px solid rgba(34,197,94,.24);font-size:28px;font-weight:950;color:#bbf7d0;box-shadow:0 18px 50px rgba(0,0,0,.18)}
+.verify-note{display:flex;flex-direction:column;gap:5px;margin:18px 0;padding:14px 15px;border-radius:16px;background:rgba(59,130,246,.055);border:1px solid rgba(59,130,246,.16)}
+.verify-note strong{font-size:12px;color:var(--text)}
+.verify-note span{font-size:11px;line-height:1.55;color:var(--muted)}
