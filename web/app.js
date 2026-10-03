@@ -1735,6 +1735,264 @@ async function resetDevices(shopId) {
   await loadAdminClients();
 }
 
+
+function portalTokenFromPath() {
+  const path = currentPath();
+  const query = path.includes("?") ? path.slice(path.indexOf("?") + 1) : "";
+  return new URLSearchParams(query).get("token") || "";
+}
+
+function portalStatus(value) {
+  return pill(value || "—");
+}
+
+async function renderCustomerPortal() {
+  const token = portalTokenFromPath();
+
+  if (!token) {
+    app.innerHTML = [
+      '<div class="portal-shell">',
+        '<div class="portal-wrap">',
+          '<div class="portal-brand"><span class="brand-logo">M</span><span>MotoPOS Customer Portal</span></div>',
+          '<div class="portal-card portal-error-card">',
+            '<span class="eyebrow">Private customer access</span>',
+            '<h1>Portal link required</h1>',
+            '<p>This page needs the secure customer link issued by the motorcycle shop.</p>',
+            '<a class="btn btn-secondary" href="#/">Back to MotoPOS</a>',
+          '</div>',
+        '</div>',
+      '</div>'
+    ].join("");
+    return;
+  }
+
+  app.innerHTML = [
+    '<div class="portal-shell">',
+      '<div class="portal-wrap">',
+        '<div class="portal-brand"><span class="brand-logo">M</span><span>MotoPOS Customer Portal</span></div>',
+        '<div class="portal-card">',
+          '<div class="portal-loading"><span class="spinner"></span><strong>Loading your service records…</strong></div>',
+        '</div>',
+      '</div>',
+    '</div>'
+  ].join("");
+
+  const result = await supabase.rpc("portal_customer_snapshot", { p_token: token });
+  if (result.error) {
+    app.innerHTML = [
+      '<div class="portal-shell">',
+        '<div class="portal-wrap">',
+          '<div class="portal-brand"><span class="brand-logo">M</span><span>MotoPOS Customer Portal</span></div>',
+          '<div class="portal-card portal-error-card">',
+            '<span class="eyebrow">Secure link</span>',
+            '<h1>Link unavailable</h1>',
+            '<p>', esc(friendlyError(result.error)), '</p>',
+            '<p class="muted">The link may be invalid, expired, or revoked. Request a new customer portal link from your shop.</p>',
+          '</div>',
+        '</div>',
+      '</div>'
+    ].join("");
+    return;
+  }
+
+  const snapshot = result.data || {};
+  const shop = snapshot.shop || {};
+  const customer = snapshot.customer || {};
+  const motorcycles = Array.isArray(snapshot.motorcycles) ? snapshot.motorcycles : [];
+  const jobs = Array.isArray(snapshot.jobs) ? snapshot.jobs : [];
+  const warranties = Array.isArray(snapshot.warranties) ? snapshot.warranties : [];
+  const bookings = Array.isArray(snapshot.bookings) ? snapshot.bookings : [];
+
+  const motorcycleOptions = motorcycles.length
+    ? motorcycles.map(function (bike) {
+        const label = [bike.make, bike.model, bike.variant, bike.plate_number].filter(Boolean).join(" • ");
+        return '<option value="' + esc(bike.id) + '">' + esc(label || "Motorcycle") + '</option>';
+      }).join("")
+    : '<option value="">No motorcycle on file</option>';
+
+  const motorcycleCards = motorcycles.length
+    ? motorcycles.map(function (bike) {
+        return [
+          '<div class="portal-list-item">',
+            '<div>',
+              '<strong>', esc([bike.make, bike.model].filter(Boolean).join(" ") || "Motorcycle"), '</strong>',
+              '<span>', esc([bike.variant, bike.model_year, bike.plate_number].filter(Boolean).join(" • ") || "No plate details"), '</span>',
+            '</div>',
+            '<b>', esc(bike.odometer_km != null ? number(bike.odometer_km) + " km" : "—"), '</b>',
+          '</div>'
+        ].join("");
+      }).join("")
+    : '<div class="portal-empty">No motorcycle records yet.</div>';
+
+  const jobCards = jobs.length
+    ? jobs.map(function (job) {
+        return [
+          '<div class="portal-list-item portal-list-stack">',
+            '<div class="portal-row">',
+              '<div>',
+                '<strong>', esc(job.job_number || "Job order"), '</strong>',
+                '<span>', esc(niceDate(job.created_at, true)), '</span>',
+              '</div>',
+              portalStatus(job.status),
+            '</div>',
+            '<p>', esc(job.complaint || "No complaint / service note recorded."), '</p>',
+            job.estimated_completion ? '<small>Estimated completion: ' + esc(niceDate(job.estimated_completion, true)) + '</small>' : '',
+          '</div>'
+        ].join("");
+      }).join("")
+    : '<div class="portal-empty">No service job history yet.</div>';
+
+  const warrantyCards = warranties.length
+    ? warranties.map(function (warranty) {
+        return [
+          '<div class="portal-list-item portal-list-stack">',
+            '<div class="portal-row">',
+              '<div>',
+                '<strong>', esc(warranty.description || "Warranty"), '</strong>',
+                '<span>', esc((warranty.warranty_type || "warranty") + " • " + (warranty.starts_on || "—") + " to " + (warranty.expires_on || "No expiry")), '</span>',
+              '</div>',
+              portalStatus(warranty.status),
+            '</div>',
+          '</div>'
+        ].join("");
+      }).join("")
+    : '<div class="portal-empty">No warranty records available.</div>';
+
+  const bookingCards = bookings.length
+    ? bookings.map(function (booking) {
+        return [
+          '<div class="portal-list-item">',
+            '<div>',
+              '<strong>', esc(niceDate(booking.requested_at, true)), '</strong>',
+              '<span>', esc(booking.service_notes || "Service appointment"), '</span>',
+            '</div>',
+            portalStatus(booking.status),
+          '</div>'
+        ].join("");
+      }).join("")
+    : '<div class="portal-empty">No bookings yet.</div>';
+
+  app.innerHTML = [
+    '<div class="portal-shell">',
+      '<div class="portal-wrap">',
+        '<header class="portal-header">',
+          '<div class="portal-brand"><span class="brand-logo">M</span><span>MotoPOS Customer Portal</span></div>',
+          '<div class="portal-shop">',
+            '<strong>', esc(shop.name || "MotoPOS Shop"), '</strong>',
+            '<span>', esc([shop.phone, shop.email].filter(Boolean).join(" • ") || "Customer service portal"), '</span>',
+          '</div>',
+        '</header>',
+
+        '<section class="portal-hero-card">',
+          '<div>',
+            '<span class="eyebrow">Private service dashboard</span>',
+            '<h1>Hello, ', esc(customer.name || "Rider"), '</h1>',
+            '<p>Review your motorcycle records, service progress, warranty coverage and appointments in one place.</p>',
+          '</div>',
+          '<div class="portal-wallet">',
+            '<div><span>Loyalty points</span><strong>', esc(number(customer.loyalty_points || 0)), '</strong></div>',
+            '<div><span>Store credit</span><strong>', esc(money(customer.store_credit_balance || 0)), '</strong></div>',
+          '</div>',
+        '</section>',
+
+        '<div class="portal-grid">',
+          '<section class="portal-card">',
+            '<div class="portal-section-head"><div><span class="eyebrow">Garage</span><h2>Your motorcycles</h2></div></div>',
+            motorcycleCards,
+          '</section>',
+
+          '<section class="portal-card">',
+            '<div class="portal-section-head"><div><span class="eyebrow">Workshop</span><h2>Service history</h2></div></div>',
+            jobCards,
+          '</section>',
+
+          '<section class="portal-card">',
+            '<div class="portal-section-head"><div><span class="eyebrow">Coverage</span><h2>Warranty</h2></div></div>',
+            warrantyCards,
+          '</section>',
+
+          '<section class="portal-card">',
+            '<div class="portal-section-head"><div><span class="eyebrow">Appointments</span><h2>Bookings</h2></div></div>',
+            bookingCards,
+          '</section>',
+        '</div>',
+
+        '<section class="portal-card portal-booking-card">',
+          '<div class="portal-section-head">',
+            '<div><span class="eyebrow">Book a visit</span><h2>Request service</h2></div>',
+            '<span class="portal-private">Secure customer link</span>',
+          '</div>',
+          '<div class="portal-form-grid">',
+            '<label><span>Motorcycle</span><select id="portal-bike">', motorcycleOptions, '</select></label>',
+            '<label><span>Preferred date & time</span><input id="portal-booking-at" type="datetime-local" /></label>',
+            '<label class="portal-full"><span>Requested service / concern</span><textarea id="portal-booking-notes" rows="4" placeholder="Example: change oil, check front brake, tune-up…"></textarea></label>',
+          '</div>',
+          '<div class="portal-form-actions">',
+            '<span id="portal-booking-message" class="muted">The shop will review and confirm your request.</span>',
+            '<button id="portal-booking-submit" class="btn btn-primary" type="button">Request booking</button>',
+          '</div>',
+        '</section>',
+
+        '<footer class="portal-footer">',
+          '<span>Powered by MotoPOS</span>',
+          '<span>', esc(shop.address || "Motorcycle parts & service management"), '</span>',
+        '</footer>',
+      '</div>',
+    '</div>'
+  ].join("");
+
+  const dateInput = document.querySelector("#portal-booking-at");
+  if (dateInput) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset() + 60);
+    dateInput.min = now.toISOString().slice(0, 16);
+  }
+
+  document.querySelector("#portal-booking-submit")?.addEventListener("click", async function () {
+    const button = document.querySelector("#portal-booking-submit");
+    const message = document.querySelector("#portal-booking-message");
+    const motorcycleId = document.querySelector("#portal-bike")?.value || null;
+    const localDate = document.querySelector("#portal-booking-at")?.value || "";
+    const notes = document.querySelector("#portal-booking-notes")?.value?.trim() || "";
+
+    if (!localDate) {
+      if (message) message.textContent = "Choose your preferred date and time.";
+      return;
+    }
+
+    const parsed = new Date(localDate);
+    if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+      if (message) message.textContent = "Please choose a future appointment time.";
+      return;
+    }
+
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Sending…";
+    }
+    if (message) message.textContent = "Sending booking request…";
+
+    const booking = await supabase.rpc("portal_create_booking", {
+      p_token: token,
+      p_motorcycle_id: motorcycleId || null,
+      p_requested_at: parsed.toISOString(),
+      p_service_notes: notes || null
+    });
+
+    if (booking.error) {
+      if (message) message.textContent = friendlyError(booking.error);
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Request booking";
+      }
+      return;
+    }
+
+    toast("Booking request sent.", "success");
+    await renderCustomerPortal();
+  });
+}
+
 async function route() {
   const path = currentPath();
 
@@ -1745,6 +2003,11 @@ async function route() {
 
   if (path === "manual") {
     renderManual();
+    return;
+  }
+
+  if (path === "portal" || path.startsWith("portal?")) {
+    await renderCustomerPortal();
     return;
   }
 
