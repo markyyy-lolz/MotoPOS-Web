@@ -309,6 +309,63 @@ async function loadAccessContext() {
     }
   }
 }
+function confirmationTokenFromHash() {
+  const raw = location.hash.replace(/^#\/?/, "");
+  const queryIndex = raw.indexOf("?");
+  if (queryIndex < 0) return "";
+  return new URLSearchParams(raw.slice(queryIndex + 1)).get("token") || "";
+}
+
+function renderEmailConfirmationGate() {
+  const token = confirmationTokenFromHash();
+  const validToken = /^[A-Za-z0-9_-]{20,}$/.test(token);
+
+  app.innerHTML = `
+    <div class="setup">
+      <div class="setup-card email-confirm-card">
+        <div class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></div>
+        <div class="verify-shield">✓</div>
+        <span class="eyebrow">Email verification</span>
+        <h1>${validToken ? "Confirm your email address" : "Verification link unavailable"}</h1>
+        <p>${
+          validToken
+            ? "For your security, MotoPOS does not verify the account just because an email scanner opened this page. Press the button below yourself to confirm your email address."
+            : "This confirmation link is incomplete or invalid. Request a new verification email from the MotoPOS sign-in page."
+        }</p>
+        <div class="verify-note">
+          <strong>${validToken ? "One manual confirmation" : "Need another link?"}</strong>
+          <span>${
+            validToken
+              ? "The one-time Supabase verification link is consumed only after you press Confirm email address."
+              : "Enter your email on the sign-in page and choose Resend verification email."
+          }</span>
+        </div>
+        <div class="form">
+          ${
+            validToken
+              ? '<button class="btn btn-primary" type="button" id="confirm-email-now">Confirm email address</button>'
+              : '<a class="btn btn-primary" href="#/login">Request a new verification email</a>'
+          }
+          <a class="btn btn-secondary" href="#/">Back to MotoPOS website</a>
+        </div>
+      </div>
+    </div>`;
+
+  document.querySelector("#confirm-email-now")?.addEventListener("click", () => {
+    const button = document.querySelector("#confirm-email-now");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Confirming…";
+    }
+
+    const verifyUrl = new URL(SUPABASE_URL + "/auth/v1/verify");
+    verifyUrl.searchParams.set("token", token);
+    verifyUrl.searchParams.set("type", "email");
+    verifyUrl.searchParams.set("redirect_to", EMAIL_CONFIRM_REDIRECT);
+    window.location.assign(verifyUrl.toString());
+  });
+}
+
 function renderEmailVerified() {
   const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
   const errorDescription = hashParams.get("error_description");
@@ -347,7 +404,7 @@ function renderManual() {
         <h3>1. Create an owner account</h3>
         <p>Open MotoPOS and choose <strong>Create Account</strong>. Enter the owner's name, email, and password.</p>
         <h3>2. Verify the email</h3>
-        <p>Open the Supabase verification email and press the confirmation link. It should return to the MotoPOS Cloud confirmation page. After verification, go back to the Android app and sign in.</p>
+        <p>Open the MotoPOS verification email and press <strong>Confirm email address</strong>. MotoPOS first opens a safe confirmation page; press <strong>Confirm email address</strong> there once more to complete Supabase verification. This prevents automated email-security scanners from consuming the one-time verification link before you do.</p>
         <h3>3. Create the shop workspace</h3>
         <p>Enter the shop name, phone number, and address. The first account becomes the shop owner.</p>
         <h3>4. Automatic trial</h3>
@@ -2744,6 +2801,11 @@ async function route() {
 
   if (new URLSearchParams(location.search).get("email-confirmed") === "1") {
     renderEmailVerified();
+    return;
+  }
+
+  if (path === "confirm-email" || path.startsWith("confirm-email?")) {
+    renderEmailConfirmationGate();
     return;
   }
 
