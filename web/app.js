@@ -1962,23 +1962,43 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
 }
 
 async function pageLicense(root) {
-  const [licenseRes, deviceRes, memberRes] = await Promise.all([
-    supabase.from("shop_licenses").select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days").eq("shop_id",state.shop.id).maybeSingle(),
-    supabase.from("device_sessions").select("id,device_id,device_name,app_version,last_seen_at,is_active").eq("shop_id",state.shop.id).order("last_seen_at",{ascending:false}),
-    supabase.from("shop_members").select("id").eq("shop_id",state.shop.id).eq("is_active",true)
+  const canSeeHistory = ["owner","admin","manager"].includes(state.membership?.role);
+  const [licenseRes, deviceRes, memberRes, historyRes] = await Promise.all([
+    supabase.from("shop_licenses")
+      .select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days,billing_cycle,price_snapshot_php")
+      .eq("shop_id",state.shop.id).maybeSingle(),
+    supabase.from("device_sessions")
+      .select("id,device_id,device_name,app_version,last_seen_at,is_active")
+      .eq("shop_id",state.shop.id).order("last_seen_at",{ascending:false}),
+    supabase.from("shop_members").select("id").eq("shop_id",state.shop.id).eq("is_active",true),
+    canSeeHistory
+      ? supabase.from("license_events")
+          .select("id,event_type,plan_code,billing_cycle,amount_php,starts_at,expires_at,max_devices,max_staff,details,created_at")
+          .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
+      : Promise.resolve({data:[],error:null})
   ]);
   if (licenseRes.error) throw licenseRes.error;
   if (deviceRes.error) throw deviceRes.error;
 
   const license = licenseRes.data;
+  const ent = state.entitlements || {};
   const devices = (deviceRes.data||[]).filter(d=>d.is_active);
   const staffCount = memberRes.data?.length || 0;
+  const history = historyRes.data || [];
+  const features = entitlementFeatures();
   const trial = license?.status === "trial" ? trialRemaining(license.expires_at) : null;
-  const effectiveStatus =
-    license?.status === "trial" && trial?.days === 0 ? "expired" : license?.status;
+  const effectiveStatus = ent.status || (
+    license?.status === "trial" && trial?.days === 0 ? "expired" : license?.status
+  );
+  const cycleLabel = license?.billing_cycle
+    ? license.billing_cycle.charAt(0).toUpperCase() + license.billing_cycle.slice(1)
+    : "Custom";
+  const billing = license?.status === "trial"
+    ? "Free 7-day Pro Trial"
+    : `${cycleLabel}${license?.price_snapshot_php != null ? ` · ${peso(license.price_snapshot_php)}` : ""}`;
 
   root.innerHTML = `
-    ${head("License","MotoPOS plan, trial, limits and current activation status")}
+    ${head("License","MotoPOS plan, entitlements, limits and activation status")}
     ${license ? `
       ${license.status === "trial" ? `
         <div class="card" style="margin-bottom:14px;border-color:rgba(59,130,246,.28)">
@@ -1986,38 +2006,64 @@ async function pageLicense(root) {
           <div class="help">
             ${trial?.days > 0
               ? `Your full MotoPOS Pro trial is active. <strong style="color:var(--text)">${esc(trial.label)}</strong>. No license key is required during the trial.`
-              : "Your 7-day MotoPOS trial has expired. Ask the MotoPOS administrator to issue a paid license to continue licensed operations."}
+              : "Your MotoPOS trial has expired. Choose a paid plan to continue licensed shop operations."}
           </div>
         </div>
       ` : ""}
       <section class="metrics">
         <article class="metric">
           <div class="metric-label">Plan</div>
-          <div class="metric-value" style="text-transform:capitalize">${license.status === "trial" ? "Pro Trial" : esc(license.plan_code)}</div>
-          <div class="metric-sub">${license.status === "trial" ? "Full Pro features for 7 days" : `Key ending ••••${esc(license.license_key_last4||"—")}`}</div>
+          <div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.plan_code || "—")}</div>
+          <div class="metric-sub">${esc(billing)}</div>
         </article>
         <article class="metric">
           <div class="metric-label">Status</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus)}</div>
-          <div class="metric-sub">${license.expires_at ? `${license.status === "trial" ? (trial?.label || "Trial") : "Expires"} · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
+          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus || "unknown")}</div>
+          <div class="metric-sub">${license.expires_at ? `Expires · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
         </article>
         <article class="metric"><div class="metric-label">Devices</div><div class="metric-value">${devices.length}/${license.max_devices}</div><div class="metric-sub">Active registered devices</div></article>
-        <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.status === "trial" ? "Trial staff allowance" : `${license.offline_grace_days}-day offline grace`}</div></article>
+        <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.offline_grace_days}-day offline grace</div></article>
       </section>
+
       <div class="card">
+        <div class="card-title"><h3>Included in your plan</h3><span class="pill blue">${features.length} entitlements</span></div>
+        <div class="entitlement-grid">
+          ${features.length
+            ? features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("")
+            : '<span class="help">Licensed modules are unavailable until the plan is active.</span>'}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
         <div class="card-title"><h3>${license.status === "trial" ? "Trial rules" : "License security"}</h3></div>
         <div class="help">
           ${license.status === "trial"
-            ? "Trial starts automatically when a new shop has no paid license. After 7 days it expires automatically. Issuing a paid license replaces the trial."
-            : "MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when your MotoPOS administrator issues or reissues it."}
+            ? "The trial starts automatically for a new shop and provides Pro entitlements for 7 days. A paid license replaces the trial."
+            : "MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when a MotoPOS administrator issues or renews the license."}
         </div>
       </div>
+
+      ${canSeeHistory ? `
+        <div class="card" style="margin-top:14px">
+          <div class="card-title"><h3>License history</h3><span class="help">Latest ${history.length} event(s)</span></div>
+          <div class="stat-list">
+            ${history.length ? history.map(event => `
+              <div class="stat-row">
+                <span>
+                  <strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong>
+                  <small>${niceDate(event.created_at,true)}</small>
+                </span>
+                <strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong>
+              </div>
+            `).join("") : '<div class="help">No paid license events yet.</div>'}
+          </div>
+        </div>
+      ` : ""}
     ` : `
       <div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>
     `}
   `;
 }
-
 async function pageDevices(root) {
   const { data, error } = await supabase.from("device_sessions")
     .select("id,device_id,device_name,app_version,last_seen_at,is_active,created_at")
