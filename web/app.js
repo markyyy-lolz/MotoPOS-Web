@@ -105,18 +105,18 @@ function currentPath() {
 
 function rolePages(role) {
   const r = String(role || "").toLowerCase();
-  const full = ["overview","sales","inventory","customers","staff","service","suppliers","operations","branches","reports","support","license","devices","settings"];
+  const full = ["overview","sales","inventory","customers","staff","service","quotes","suppliers","operations","branches","reports","support","license","devices","settings"];
   if (["owner","admin","manager"].includes(r)) return full;
-  if (r === "cashier") return ["overview","sales","customers","service","operations","support","license"];
+  if (r === "cashier") return ["overview","sales","customers","service","quotes","operations","support","license"];
   if (r === "inventory") return ["overview","inventory","suppliers","operations","support","license"];
-  if (r === "mechanic") return ["overview","customers","service","operations","support","license"];
+  if (r === "mechanic") return ["overview","customers","service","quotes","operations","support","license"];
   return ["overview","support","license"];
 }
 
 function navLabel(page) {
   return ({
     overview:"Overview", sales:"Sales", inventory:"Inventory", customers:"Customers",
-    staff:"Staff", service:"Service Jobs", suppliers:"Suppliers", operations:"Operations", branches:"Branches", reports:"Reports",
+    staff:"Staff", service:"Service Jobs", quotes:"Quotations", suppliers:"Suppliers", operations:"Operations", branches:"Branches", reports:"Reports",
     support:"Support Chat", license:"License", devices:"Devices", settings:"Settings"
   })[page] || page;
 }
@@ -839,6 +839,7 @@ async function loadDashboardPage(page) {
       case "customers": return await pageCustomers(root);
       case "staff": return await pageStaff(root);
       case "service": return await pageService(root);
+      case "quotes": return await pageQuotes(root);
       case "suppliers": return await pageSuppliers(root);
       case "operations": return await pageOperations(root);
       case "branches": return await pageBranches(root);
@@ -1283,6 +1284,99 @@ async function pageService(root) {
     <div class="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Priority</th><th>Complaint</th><th>Odometer</th><th>Created</th></tr></thead><tbody>
       ${(data||[]).map(j=>`<tr><td><strong>${esc(j.job_number)}</strong></td><td>${pill(j.status)}</td><td>${pill(j.priority)}</td><td>${esc(j.complaint||"—")}</td><td>${j.odometer_in?number(j.odometer_in)+" km":"—"}</td><td>${niceDate(j.created_at,true)}</td></tr>`).join("") || '<tr><td colspan="6">No job orders yet.</td></tr>'}
     </tbody></table></div>`;
+}
+
+
+async function pageQuotes(root) {
+  const [quoteRes,customerRes,bikeRes,productRes] = await Promise.all([
+    supabase.from("quotations").select("id,quote_number,customer_id,motorcycle_id,status,subtotal,discount_amount,total_amount,valid_until,notes,created_at").eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(100),
+    supabase.from("customers").select("id,name").eq("shop_id",state.shop.id).eq("is_active",true).order("name"),
+    supabase.from("motorcycles").select("id,customer_id,make,model,plate_number").eq("shop_id",state.shop.id),
+    supabase.from("products").select("id,name,sku,selling_price,is_active").eq("shop_id",state.shop.id).eq("is_active",true).order("name")
+  ]);
+  for(const r of [quoteRes,customerRes,bikeRes,productRes]) if(r.error) throw r.error;
+  const quotes=quoteRes.data||[];
+  const customers=customerRes.data||[];
+  const bikes=bikeRes.data||[];
+  const products=productRes.data||[];
+
+  root.innerHTML=`
+    ${head("Quotations","Create estimates for parts and service, then convert approved work into job orders",'<button id="new-quote" class="btn btn-primary">New quotation</button>')}
+    <div class="table-wrap"><table><thead><tr><th>Quote</th><th>Customer</th><th>Motorcycle</th><th>Status</th><th>Valid until</th><th>Total</th><th>Manage</th></tr></thead><tbody>
+      ${quotes.map(q=>{
+        const customer=customers.find(c=>c.id===q.customer_id);
+        const bike=bikes.find(b=>b.id===q.motorcycle_id);
+        return `<tr><td><strong>${esc(q.quote_number)}</strong><div class="help">${niceDate(q.created_at,true)}</div></td><td>${esc(customer?.name||"Walk-in")}</td><td>${bike?esc(bike.make+" "+bike.model+(bike.plate_number?" • "+bike.plate_number:"")):"—"}</td><td>${pill(q.status)}</td><td>${esc(q.valid_until||"—")}</td><td><strong>${money(q.total_amount)}</strong></td><td>${q.status!=="converted"&&q.customer_id&&q.motorcycle_id?'<button class="btn btn-secondary btn-sm convert-quote" data-id="'+q.id+'">Convert to Job</button>':""}</td></tr>`;
+      }).join("")||'<tr><td colspan="7">No quotations yet.</td></tr>'}
+    </tbody></table></div>`;
+
+  document.querySelector("#new-quote")?.addEventListener("click",()=>{
+    showModal(`
+      <h2>New quotation</h2>
+      <p>Create a quick parts estimate. Service/labor lines can also be entered manually.</p>
+      <form id="quote-form" class="form">
+        <div class="grid-2">
+          <div class="field"><label>Customer</label><select class="input" name="customer"><option value="">Walk-in / none</option>${customers.map(c=>'<option value="'+esc(c.id)+'">'+esc(c.name)+'</option>').join("")}</select></div>
+          <div class="field"><label>Motorcycle</label><select class="input" name="bike"><option value="">None</option>${bikes.map(b=>'<option value="'+esc(b.id)+'" data-customer="'+esc(b.customer_id)+'">'+esc(b.make+" "+b.model+(b.plate_number?" • "+b.plate_number:""))+'</option>').join("")}</select></div>
+        </div>
+        <div class="field"><label>Inventory part</label><select class="input" name="product"><option value="">Manual line</option>${products.map(p=>'<option value="'+esc(p.id)+'" data-name="'+esc(p.name)+'" data-price="'+Number(p.selling_price||0)+'">'+esc(p.name)+' · '+esc(p.sku)+'</option>').join("")}</select></div>
+        <div class="grid-2"><div class="field"><label>Description</label><input class="input" name="description" placeholder="Part / service / labor" required></div><div class="field"><label>Line type</label><select class="input" name="type"><option value="part">Part</option><option value="service">Service</option><option value="labor">Labor</option><option value="other">Other</option></select></div></div>
+        <div class="grid-2"><div class="field"><label>Quantity</label><input class="input" type="number" name="qty" min="0.01" step="0.01" value="1" required></div><div class="field"><label>Unit price</label><input class="input" type="number" name="price" min="0" step="0.01" value="0" required></div></div>
+        <div class="grid-2"><div class="field"><label>Discount</label><input class="input" type="number" name="discount" min="0" step="0.01" value="0"></div><div class="field"><label>Valid until</label><input class="input" type="date" name="valid_until"></div></div>
+        <div class="field"><label>Notes</label><textarea class="input" name="notes"></textarea></div>
+        <div class="help">This quick form creates one quote line. The Android app supports building multi-line quotations.</div>
+        <div class="modal-actions"><button type="button" id="close-quote" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Create quotation</button></div>
+      </form>`);
+
+    const form=document.querySelector("#quote-form");
+    const productSelect=form?.querySelector('[name="product"]');
+    productSelect?.addEventListener("change",()=>{
+      const opt=productSelect.selectedOptions[0];
+      if(!opt?.value) return;
+      form.querySelector('[name="description"]').value=opt.dataset.name||"";
+      form.querySelector('[name="price"]').value=opt.dataset.price||"0";
+      form.querySelector('[name="type"]').value="part";
+    });
+
+    form?.querySelector('[name="customer"]')?.addEventListener("change",e=>{
+      const customerId=e.target.value;
+      const bikeSel=form.querySelector('[name="bike"]');
+      [...bikeSel.options].forEach((opt,i)=>{ if(i>0) opt.hidden=Boolean(customerId)&&opt.dataset.customer!==customerId; });
+      if(bikeSel.selectedOptions[0]?.hidden) bikeSel.value="";
+    });
+
+    document.querySelector("#close-quote")?.addEventListener("click",closeModal);
+    form?.addEventListener("submit",async e=>{
+      e.preventDefault(); const fd=new FormData(e.currentTarget);
+      const productId=String(fd.get("product")||"")||null;
+      const line={
+        item_type:String(fd.get("type")||"other"),
+        product_id:productId,
+        description:String(fd.get("description")||"").trim(),
+        quantity:Number(fd.get("qty")||1),
+        unit_price:Number(fd.get("price")||0)
+      };
+      const r=await supabase.rpc("create_quotation_v2",{
+        p_shop_id:state.shop.id,
+        p_customer_id:String(fd.get("customer")||"")||null,
+        p_motorcycle_id:String(fd.get("bike")||"")||null,
+        p_items:[line],
+        p_discount_amount:Number(fd.get("discount")||0),
+        p_valid_until:String(fd.get("valid_until")||"")||null,
+        p_notes:String(fd.get("notes")||"").trim()||null
+      });
+      if(r.error) return toast(friendlyError(r.error),"error");
+      closeModal(); toast("Quotation created.","success"); await pageQuotes(root);
+    });
+  });
+
+  root.querySelectorAll(".convert-quote").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm("Convert this quotation into a job order?")) return;
+    const r=await supabase.rpc("convert_quotation_to_job",{p_quotation_id:btn.dataset.id});
+    if(r.error) return toast(friendlyError(r.error),"error");
+    toast("Quotation converted to a job order.","success");
+    await pageQuotes(root);
+  }));
 }
 
 async function pageSuppliers(root) {
