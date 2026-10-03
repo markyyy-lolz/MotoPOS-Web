@@ -25,7 +25,8 @@ const state = {
   authMode: "signin",
   busy: false,
   supportThreadId: null,
-  supportChannel: null
+  supportChannel: null,
+  entitlements: null
 };
 
 const money = value => new Intl.NumberFormat("en-PH", {
@@ -35,6 +36,11 @@ const money = value => new Intl.NumberFormat("en-PH", {
 }).format(Number(value || 0));
 
 const number = value => new Intl.NumberFormat("en-PH").format(Number(value || 0));
+const peso = value => new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0
+}).format(Number(value || 0));
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;")
   .replaceAll("<", "&lt;")
@@ -121,6 +127,96 @@ function navLabel(page) {
   })[page] || page;
 }
 
+const FEATURE_LABELS = {
+  pos: "Point of Sale",
+  inventory: "Inventory",
+  customers: "Customers",
+  quotations: "Quotations",
+  basic_reports: "Basic reports",
+  reports: "Reports & analytics",
+  advanced_reports: "Advanced reports",
+  bluetooth_receipts: "Bluetooth receipts",
+  service_jobs: "Service jobs",
+  suppliers: "Suppliers & purchasing",
+  staff: "Staff management",
+  operations: "Cashier operations",
+  warranties: "Warranties",
+  receivables: "Customer receivables",
+  inventory_counts: "Physical inventory counts",
+  loyalty: "Loyalty & store credit",
+  device_management: "Device management",
+  multi_branch: "Multi-branch",
+  stock_transfers: "Stock transfers",
+  priority_support: "Priority support",
+  support: "Support"
+};
+
+const PAGE_FEATURES = {
+  sales: ["pos"],
+  inventory: ["inventory"],
+  customers: ["customers"],
+  staff: ["staff"],
+  service: ["service_jobs"],
+  quotes: ["quotations"],
+  suppliers: ["suppliers"],
+  operations: ["operations"],
+  branches: ["multi_branch"],
+  reports: ["basic_reports","reports","advanced_reports"],
+  devices: ["device_management"]
+};
+
+const ALWAYS_AVAILABLE_PAGES = new Set(["license","support","settings"]);
+
+function featureLabel(code) {
+  return FEATURE_LABELS[code] || String(code || "").replaceAll("_"," ");
+}
+
+function entitlementFeatures() {
+  return Array.isArray(state.entitlements?.features) ? state.entitlements.features : [];
+}
+
+function planAllowsPage(page) {
+  if (ALWAYS_AVAILABLE_PAGES.has(page)) return true;
+  if (!state.entitlements?.valid) return false;
+  if (page === "overview") return true;
+  const required = PAGE_FEATURES[page];
+  if (!required?.length) return true;
+  const features = entitlementFeatures();
+  return required.some(feature => features.includes(feature));
+}
+
+function planPagesForRole(role) {
+  return rolePages(role).filter(planAllowsPage);
+}
+
+function renderPlanLocked(root, page) {
+  const e = state.entitlements || {};
+  const required = PAGE_FEATURES[page] || [];
+  const reason = !e.valid
+    ? `Your MotoPOS license is ${e.status || "inactive"}. Renew or activate a plan to continue using shop operations.`
+    : `${navLabel(page)} is not included in your current ${e.plan_name || e.plan_code || "MotoPOS"} plan.`;
+
+  root.innerHTML = `
+    ${head("Plan access required", navLabel(page))}
+    <div class="card plan-lock-card">
+      <span class="kicker">MotoPOS entitlement</span>
+      <h2>${esc(reason)}</h2>
+      ${required.length ? `<p>Required entitlement: <strong>${esc(required.map(featureLabel).join(" or "))}</strong></p>` : ""}
+      <div class="actions">
+        <a class="btn btn-primary" href="#/dashboard/license">View license & plan</a>
+        <a class="btn btn-secondary" href="#/dashboard/support">Contact support</a>
+      </div>
+    </div>
+  `;
+}
+
+function recommendedLicenseDate(cycle) {
+  const date = new Date();
+  if (cycle === "monthly") date.setMonth(date.getMonth() + 1);
+  else if (cycle === "annual") date.setFullYear(date.getFullYear() + 1);
+  return date.toISOString().slice(0,10);
+}
+
 async function functionErrorDetails(error) {
   if (!error) return null;
   try {
@@ -176,6 +272,7 @@ async function loadAccessContext() {
   state.membership = null;
   state.shop = null;
   state.isSystemAdmin = false;
+  state.entitlements = null;
 
   if (!state.user) return;
 
@@ -199,8 +296,17 @@ async function loadAccessContext() {
   state.membership = memberRes.data || null;
   state.shop = memberRes.data?.shop || null;
   state.isSystemAdmin = Boolean(adminRes.data);
-}
 
+  if (state.shop?.id) {
+    const { data, error } = await supabase.rpc("get_shop_entitlements", { p_shop_id: state.shop.id });
+    if (error) {
+      console.warn("Entitlement load:", error.message);
+      state.entitlements = { valid: false, status: "unavailable", features: [] };
+    } else {
+      state.entitlements = data || { valid: false, status: "unlicensed", features: [] };
+    }
+  }
+}
 function renderEmailVerified() {
   const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
   const errorDescription = hashParams.get("error_description");
@@ -640,43 +746,47 @@ async function loadPublicPlans() {
   if (!root) return;
   const { data, error } = await supabase
     .from("license_plans")
-    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days")
+    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
     .eq("is_active", true)
-    .order("default_max_devices");
+    .order("sort_order");
+
   if (error || !data?.length) {
-    root.innerHTML = `<div class="empty" style="grid-column:1/-1"><strong>MotoPOS plans</strong>Plan details are available after sign in.</div>`;
+    root.innerHTML = `<div class="empty" style="grid-column:1/-1"><strong>MotoPOS plans</strong>Plan details are temporarily unavailable.</div>`;
     return;
   }
-  const pricing = {
-    basic: { monthly: "₱499", annual: "₱4,990/year", note: "Best for small parts shops" },
-    pro: { monthly: "₱999", annual: "₱9,990/year", note: "Best for full motorcycle shops" },
-    business: { monthly: "₱1,799", annual: "₱17,990/year", note: "Best for larger teams" }
-  };
 
   root.innerHTML = data.map(plan => {
-    const price = pricing[plan.code] || { monthly: "Contact us", annual: "", note: "" };
+    const features = Array.isArray(plan.features) ? plan.features : [];
+    const monthly = plan.monthly_price_php == null ? "Contact us" : peso(plan.monthly_price_php);
+    const annual = plan.annual_price_php == null ? "" : `${peso(plan.annual_price_php)}/year`;
+
     return `
       <article class="price-card ${plan.code === "pro" ? "featured" : ""}">
         ${plan.code === "pro" ? '<div class="price-badge">Most popular</div>' : ""}
         <span class="kicker">${esc(plan.code)}</span>
         <h3>${esc(plan.name)}</h3>
-        <div class="plan-price"><strong>${price.monthly}</strong>${price.monthly.startsWith("₱") ? "<span>/month</span>" : ""}</div>
-        <div class="plan-annual">${esc(price.annual)}</div>
+        <div class="plan-price"><strong>${esc(monthly)}</strong>${plan.monthly_price_php != null ? "<span>/month</span>" : ""}</div>
+        <div class="plan-annual">${esc(annual)}</div>
         <p>${esc(plan.description || "")}</p>
-        <div class="plan-note">${esc(price.note)}</div>
+        <div class="plan-note">${esc(plan.marketing_note || "")}</div>
         <div class="price-meta">
           <strong>${number(plan.default_max_devices)}</strong> device(s)
           <span>·</span>
           <strong>${number(plan.default_max_staff)}</strong> staff
+          <span>·</span>
+          <strong>${number(plan.default_offline_grace_days)}</strong>-day offline grace
         </div>
-        <div class="trial-copy">Includes a free 7-day Pro Trial for new shops.</div>
+        <div class="plan-feature-list">
+          ${features.slice(0,7).map(feature => `<span>✓ ${esc(featureLabel(feature))}</span>`).join("")}
+          ${features.length > 7 ? `<span class="muted">+${features.length - 7} more</span>` : ""}
+        </div>
+        <div class="trial-copy">New shops start with a free 7-day Pro Trial. No card required.</div>
         <a class="btn ${plan.code === "pro" ? "btn-primary" : "btn-secondary"}" href="#/login?mode=signup">Start free trial</a>
       </article>
     `;
   }).join("");
   setupMotion(root);
 }
-
 function renderAuth() {
   const signupFromUrl = location.hash.includes("mode=signup");
   if (signupFromUrl) state.authMode = "signup";
@@ -824,14 +934,16 @@ function renderSetup() {
     await supabase.auth.signOut();
     state.session = state.user = state.membership = state.shop = null;
     state.isSystemAdmin = false;
+    state.entitlements = null;
     setHash("login");
   });
 }
 
 function renderShell(page) {
   const role = state.membership?.role || "staff";
-  const pages = rolePages(role);
-  if (!pages.includes(page)) page = "overview";
+  const roleAllowedPages = rolePages(role);
+  const pages = planPagesForRole(role);
+  if (!roleAllowedPages.includes(page)) page = "overview";
 
   const adminLink = state.isSystemAdmin
     ? `<a class="nav-item ${currentPath() === "admin" ? "active" : ""}" href="#/admin"><span>Developer Control</span><span class="nav-badge">ADMIN</span></a>`
@@ -841,7 +953,7 @@ function renderShell(page) {
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></div>
-        <div class="shop-chip"><strong>${esc(state.shop?.name || "MotoPOS")}</strong><span>${esc(role)}</span></div>
+        <div class="shop-chip"><strong>${esc(state.shop?.name || "MotoPOS")}</strong><span>${esc(role)} · ${esc(state.entitlements?.plan_name || state.entitlements?.status || "No plan")}</span></div>
         <nav class="nav-list">
           ${pages.map(p => `<a class="nav-item ${p === page ? "active" : ""}" href="#/dashboard/${p}"><span>${navLabel(p)}</span></a>`).join("")}
           <a class="nav-item" href="#/manual"><span>App Manual</span><span class="nav-badge">HELP</span></a>
@@ -868,6 +980,7 @@ function renderShell(page) {
     await supabase.auth.signOut();
     state.session = state.user = state.membership = state.shop = null;
     state.isSystemAdmin = false;
+    state.entitlements = null;
     setHash("");
   });
 
@@ -877,6 +990,10 @@ function renderShell(page) {
 async function loadDashboardPage(page) {
   const root = document.querySelector("#page-content");
   if (!root || !state.shop) return;
+  if (!planAllowsPage(page)) {
+    renderPlanLocked(root, page);
+    return;
+  }
   try {
     switch (page) {
       case "overview": return await pageOverview(root);
@@ -1845,23 +1962,43 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
 }
 
 async function pageLicense(root) {
-  const [licenseRes, deviceRes, memberRes] = await Promise.all([
-    supabase.from("shop_licenses").select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days").eq("shop_id",state.shop.id).maybeSingle(),
-    supabase.from("device_sessions").select("id,device_id,device_name,app_version,last_seen_at,is_active").eq("shop_id",state.shop.id).order("last_seen_at",{ascending:false}),
-    supabase.from("shop_members").select("id").eq("shop_id",state.shop.id).eq("is_active",true)
+  const canSeeHistory = ["owner","admin","manager"].includes(state.membership?.role);
+  const [licenseRes, deviceRes, memberRes, historyRes] = await Promise.all([
+    supabase.from("shop_licenses")
+      .select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days,billing_cycle,price_snapshot_php")
+      .eq("shop_id",state.shop.id).maybeSingle(),
+    supabase.from("device_sessions")
+      .select("id,device_id,device_name,app_version,last_seen_at,is_active")
+      .eq("shop_id",state.shop.id).order("last_seen_at",{ascending:false}),
+    supabase.from("shop_members").select("id").eq("shop_id",state.shop.id).eq("is_active",true),
+    canSeeHistory
+      ? supabase.from("license_events")
+          .select("id,event_type,plan_code,billing_cycle,amount_php,starts_at,expires_at,max_devices,max_staff,details,created_at")
+          .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
+      : Promise.resolve({data:[],error:null})
   ]);
   if (licenseRes.error) throw licenseRes.error;
   if (deviceRes.error) throw deviceRes.error;
 
   const license = licenseRes.data;
+  const ent = state.entitlements || {};
   const devices = (deviceRes.data||[]).filter(d=>d.is_active);
   const staffCount = memberRes.data?.length || 0;
+  const history = historyRes.data || [];
+  const features = entitlementFeatures();
   const trial = license?.status === "trial" ? trialRemaining(license.expires_at) : null;
-  const effectiveStatus =
-    license?.status === "trial" && trial?.days === 0 ? "expired" : license?.status;
+  const effectiveStatus = ent.status || (
+    license?.status === "trial" && trial?.days === 0 ? "expired" : license?.status
+  );
+  const cycleLabel = license?.billing_cycle
+    ? license.billing_cycle.charAt(0).toUpperCase() + license.billing_cycle.slice(1)
+    : "Custom";
+  const billing = license?.status === "trial"
+    ? "Free 7-day Pro Trial"
+    : `${cycleLabel}${license?.price_snapshot_php != null ? ` · ${peso(license.price_snapshot_php)}` : ""}`;
 
   root.innerHTML = `
-    ${head("License","MotoPOS plan, trial, limits and current activation status")}
+    ${head("License","MotoPOS plan, entitlements, limits and activation status")}
     ${license ? `
       ${license.status === "trial" ? `
         <div class="card" style="margin-bottom:14px;border-color:rgba(59,130,246,.28)">
@@ -1869,38 +2006,64 @@ async function pageLicense(root) {
           <div class="help">
             ${trial?.days > 0
               ? `Your full MotoPOS Pro trial is active. <strong style="color:var(--text)">${esc(trial.label)}</strong>. No license key is required during the trial.`
-              : "Your 7-day MotoPOS trial has expired. Ask the MotoPOS administrator to issue a paid license to continue licensed operations."}
+              : "Your MotoPOS trial has expired. Choose a paid plan to continue licensed shop operations."}
           </div>
         </div>
       ` : ""}
       <section class="metrics">
         <article class="metric">
           <div class="metric-label">Plan</div>
-          <div class="metric-value" style="text-transform:capitalize">${license.status === "trial" ? "Pro Trial" : esc(license.plan_code)}</div>
-          <div class="metric-sub">${license.status === "trial" ? "Full Pro features for 7 days" : `Key ending ••••${esc(license.license_key_last4||"—")}`}</div>
+          <div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.plan_code || "—")}</div>
+          <div class="metric-sub">${esc(billing)}</div>
         </article>
         <article class="metric">
           <div class="metric-label">Status</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus)}</div>
-          <div class="metric-sub">${license.expires_at ? `${license.status === "trial" ? (trial?.label || "Trial") : "Expires"} · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
+          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus || "unknown")}</div>
+          <div class="metric-sub">${license.expires_at ? `Expires · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
         </article>
         <article class="metric"><div class="metric-label">Devices</div><div class="metric-value">${devices.length}/${license.max_devices}</div><div class="metric-sub">Active registered devices</div></article>
-        <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.status === "trial" ? "Trial staff allowance" : `${license.offline_grace_days}-day offline grace`}</div></article>
+        <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.offline_grace_days}-day offline grace</div></article>
       </section>
+
       <div class="card">
+        <div class="card-title"><h3>Included in your plan</h3><span class="pill blue">${features.length} entitlements</span></div>
+        <div class="entitlement-grid">
+          ${features.length
+            ? features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("")
+            : '<span class="help">Licensed modules are unavailable until the plan is active.</span>'}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
         <div class="card-title"><h3>${license.status === "trial" ? "Trial rules" : "License security"}</h3></div>
         <div class="help">
           ${license.status === "trial"
-            ? "Trial starts automatically when a new shop has no paid license. After 7 days it expires automatically. Issuing a paid license replaces the trial."
-            : "MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when your MotoPOS administrator issues or reissues it."}
+            ? "The trial starts automatically for a new shop and provides Pro entitlements for 7 days. A paid license replaces the trial."
+            : "MotoPOS stores only a SHA-256 hash of the activation key. The full key is shown only when a MotoPOS administrator issues or renews the license."}
         </div>
       </div>
+
+      ${canSeeHistory ? `
+        <div class="card" style="margin-top:14px">
+          <div class="card-title"><h3>License history</h3><span class="help">Latest ${history.length} event(s)</span></div>
+          <div class="stat-list">
+            ${history.length ? history.map(event => `
+              <div class="stat-row">
+                <span>
+                  <strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong>
+                  <small>${niceDate(event.created_at,true)}</small>
+                </span>
+                <strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong>
+              </div>
+            `).join("") : '<div class="help">No paid license events yet.</div>'}
+          </div>
+        </div>
+      ` : ""}
     ` : `
       <div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>
     `}
   `;
 }
-
 async function pageDevices(root) {
   const { data, error } = await supabase.from("device_sessions")
     .select("id,device_id,device_name,app_version,last_seen_at,is_active,created_at")
@@ -1984,7 +2147,7 @@ async function renderAdmin() {
 async function loadAdminClients() {
   const root = document.querySelector("#admin-content");
   if (!root) return;
-  const { data, error } = await supabase.rpc("admin_client_overview");
+  const { data, error } = await supabase.rpc("admin_client_overview_v2");
   if (error) {
     root.innerHTML = `<div class="empty"><strong>Unable to load clients</strong>${esc(friendlyError(error))}</div>`;
     return;
@@ -2006,7 +2169,7 @@ async function loadAdminClients() {
         <tr>
           <td><strong>${esc(c.shop_name)}</strong><div class="help">${esc(String(c.shop_id).slice(0,8))}…</div></td>
           <td>${esc(c.owner_email||"—")}</td>
-          <td>${c.plan_code?pill(c.plan_code):"—"}</td>
+          <td>${c.plan_code?pill(c.plan_code):"—"}${c.billing_cycle?`<div class="help">${esc(c.billing_cycle)}${c.price_snapshot_php!=null?` · ${peso(c.price_snapshot_php)}`:""}</div>`:""}</td>
           <td>${pill(c.license_status)}${c.license_key_last4?`<div class="help">••••${esc(c.license_key_last4)}</div>`:""}</td>
           <td>${number(c.device_count)}/${c.max_devices??"—"}</td>
           <td>${number(c.member_count)}/${c.max_staff??"—"}</td>
@@ -2144,21 +2307,79 @@ async function loadAdminSupport() {
   await renderSupportChatPanel(document.querySelector("#admin-support-panel"),state.supportThreadId,true);
 }
 
-function openLicenseModal(shopId, shopName) {
-  const date = new Date(); date.setFullYear(date.getFullYear()+1);
-  const expires = date.toISOString().slice(0,10);
+async function openLicenseModal(shopId, shopName) {
+  const { data: plans, error } = await supabase
+    .from("license_plans")
+    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
+    .eq("is_active",true)
+    .order("sort_order");
+
+  if (error || !plans?.length) {
+    toast(friendlyError(error || new Error("No active plans found.")),"error");
+    return;
+  }
+
+  const planMap = Object.fromEntries(plans.map(plan => [plan.code, plan]));
   showModal(`
-    <h2>Issue MotoPOS license</h2>
-    <p>${esc(shopName)} · A new key will replace the previous activation key for this shop.</p>
+    <h2>Issue / renew MotoPOS license</h2>
+    <p>${esc(shopName)} · Plan defaults load automatically. Device and staff limits can still be overridden for special contracts.</p>
     <form id="license-form" class="form">
       <input type="hidden" name="shop_id" value="${esc(shopId)}">
-      <div class="field"><label>Plan</label><select class="input" name="plan"><option value="basic">Basic</option><option value="pro" selected>Pro</option><option value="business">Business</option></select></div>
-      <div class="field"><label>Expiration date</label><input class="input" type="date" name="expires" value="${expires}"></div>
-      <div class="grid-2"><div class="field"><label>Max devices</label><input class="input" type="number" min="1" name="devices" value="3"></div><div class="field"><label>Max staff</label><input class="input" type="number" min="1" name="staff" value="10"></div></div>
+      <div class="grid-2">
+        <div class="field"><label>Plan</label><select class="input" name="plan" id="license-plan">
+          ${plans.map(plan => `<option value="${esc(plan.code)}" ${plan.code==="pro"?"selected":""}>${esc(plan.name)}</option>`).join("")}
+        </select></div>
+        <div class="field"><label>Billing cycle</label><select class="input" name="cycle" id="license-cycle">
+          <option value="monthly">Monthly</option>
+          <option value="annual" selected>Annual</option>
+          <option value="custom">Custom term</option>
+        </select></div>
+      </div>
+      <div id="license-plan-preview" class="license-plan-preview"></div>
+      <div class="field"><label>Expiration date</label><input class="input" type="date" name="expires" id="license-expires"></div>
+      <div class="grid-2">
+        <div class="field"><label>Max devices</label><input class="input" type="number" min="1" name="devices" id="license-devices"></div>
+        <div class="field"><label>Max staff</label><input class="input" type="number" min="1" name="staff" id="license-staff"></div>
+      </div>
+      <div class="help">Changing the plan resets limits to that plan's defaults. Manual changes are treated as administrator overrides.</div>
       <div class="modal-actions"><button type="button" id="close-license" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Generate license</button></div>
     </form>`);
+
+  const planSelect = document.querySelector("#license-plan");
+  const cycleSelect = document.querySelector("#license-cycle");
+  const expiresInput = document.querySelector("#license-expires");
+  const devicesInput = document.querySelector("#license-devices");
+  const staffInput = document.querySelector("#license-staff");
+  const preview = document.querySelector("#license-plan-preview");
+
+  function refreshPlan(resetLimits = false) {
+    const plan = planMap[planSelect?.value] || plans[0];
+    const cycle = cycleSelect?.value || "annual";
+    if (resetLimits) {
+      if (devicesInput) devicesInput.value = plan.default_max_devices;
+      if (staffInput) staffInput.value = plan.default_max_staff;
+    }
+    if (expiresInput && cycle !== "custom") expiresInput.value = recommendedLicenseDate(cycle);
+
+    const price = cycle === "monthly"
+      ? plan.monthly_price_php
+      : cycle === "annual"
+        ? plan.annual_price_php
+        : null;
+    const features = Array.isArray(plan.features) ? plan.features : [];
+
+    if (preview) preview.innerHTML = `
+      <div><strong>${esc(plan.name)}</strong><span>${esc(plan.description || "")}</span></div>
+      <div><strong>${price == null ? "Custom billing" : peso(price)}</strong><span>${number(plan.default_max_devices)} devices · ${number(plan.default_max_staff)} staff · ${number(plan.default_offline_grace_days)}-day offline grace</span></div>
+      <div class="entitlement-grid compact">${features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("")}</div>
+    `;
+  }
+
+  planSelect?.addEventListener("change",()=>refreshPlan(true));
+  cycleSelect?.addEventListener("change",()=>refreshPlan(false));
   document.querySelector("#close-license")?.addEventListener("click",closeModal);
   document.querySelector("#license-form")?.addEventListener("submit",issueLicense);
+  refreshPlan(true);
 }
 
 async function issueLicense(event) {
@@ -2168,25 +2389,32 @@ async function issueLicense(event) {
   button.disabled=true; button.textContent="Generating…";
   const expiresRaw = String(f.get("expires")||"");
   const expiresAt = expiresRaw ? new Date(expiresRaw+"T23:59:59+08:00").toISOString() : null;
-  const { data, error } = await supabase.rpc("admin_issue_license", {
+  const cycle = String(f.get("cycle")||"annual");
+
+  const { data, error } = await supabase.rpc("admin_issue_license_v2", {
     p_shop_id:String(f.get("shop_id")),
     p_plan_code:String(f.get("plan")),
+    p_billing_cycle:cycle,
     p_expires_at:expiresAt,
     p_max_devices:Number(f.get("devices"))||null,
     p_max_staff:Number(f.get("staff"))||null
   });
+
   if (error) {
     toast(friendlyError(error),"error"); button.disabled=false; button.textContent="Generate license"; return;
   }
+
   const result = data || {};
   showModal(`
     <h2>License generated</h2>
     <p>Copy this key now. MotoPOS stores only its cryptographic hash, so the full key is not retrievable later.</p>
     <div class="key-box" id="issued-key">${esc(result.license_key||"")}</div>
     <div class="stat-list" style="margin-top:13px">
-      <div class="stat-row"><span>Plan</span><strong>${esc(result.plan_code||"")}</strong></div>
+      <div class="stat-row"><span>Plan</span><strong>${esc(result.plan_name||result.plan_code||"")}</strong></div>
+      <div class="stat-row"><span>Billing</span><strong>${esc(result.billing_cycle||"")}${result.amount_php!=null?` · ${peso(result.amount_php)}`:""}</strong></div>
       <div class="stat-row"><span>Devices</span><strong>${esc(result.max_devices||"")}</strong></div>
       <div class="stat-row"><span>Staff</span><strong>${esc(result.max_staff||"")}</strong></div>
+      <div class="stat-row"><span>Offline grace</span><strong>${esc(result.offline_grace_days||"")} days</strong></div>
       <div class="stat-row"><span>Expires</span><strong>${niceDate(result.expires_at)}</strong></div>
     </div>
     <div class="modal-actions"><button id="copy-key" class="btn btn-primary">Copy key</button><button id="done-key" class="btn btn-secondary">Done</button></div>`);
