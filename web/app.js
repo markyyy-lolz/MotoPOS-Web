@@ -318,7 +318,7 @@ function confirmationTokenFromHash() {
 
 function renderEmailConfirmationGate() {
   const token = confirmationTokenFromHash();
-  const validToken = /^[A-Za-z0-9_-]{20,}$/.test(token);
+  const validToken = token.length >= 20 && !/\\s/.test(token);
 
   app.innerHTML = `
     <div class="setup">
