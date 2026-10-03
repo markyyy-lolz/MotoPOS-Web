@@ -127,6 +127,96 @@ function navLabel(page) {
   })[page] || page;
 }
 
+const FEATURE_LABELS = {
+  pos: "Point of Sale",
+  inventory: "Inventory",
+  customers: "Customers",
+  quotations: "Quotations",
+  basic_reports: "Basic reports",
+  reports: "Reports & analytics",
+  advanced_reports: "Advanced reports",
+  bluetooth_receipts: "Bluetooth receipts",
+  service_jobs: "Service jobs",
+  suppliers: "Suppliers & purchasing",
+  staff: "Staff management",
+  operations: "Cashier operations",
+  warranties: "Warranties",
+  receivables: "Customer receivables",
+  inventory_counts: "Physical inventory counts",
+  loyalty: "Loyalty & store credit",
+  device_management: "Device management",
+  multi_branch: "Multi-branch",
+  stock_transfers: "Stock transfers",
+  priority_support: "Priority support",
+  support: "Support"
+};
+
+const PAGE_FEATURES = {
+  sales: ["pos"],
+  inventory: ["inventory"],
+  customers: ["customers"],
+  staff: ["staff"],
+  service: ["service_jobs"],
+  quotes: ["quotations"],
+  suppliers: ["suppliers"],
+  operations: ["operations"],
+  branches: ["multi_branch"],
+  reports: ["basic_reports","reports","advanced_reports"],
+  devices: ["device_management"]
+};
+
+const ALWAYS_AVAILABLE_PAGES = new Set(["license","support","settings"]);
+
+function featureLabel(code) {
+  return FEATURE_LABELS[code] || String(code || "").replaceAll("_"," ");
+}
+
+function entitlementFeatures() {
+  return Array.isArray(state.entitlements?.features) ? state.entitlements.features : [];
+}
+
+function planAllowsPage(page) {
+  if (ALWAYS_AVAILABLE_PAGES.has(page)) return true;
+  if (!state.entitlements?.valid) return false;
+  if (page === "overview") return true;
+  const required = PAGE_FEATURES[page];
+  if (!required?.length) return true;
+  const features = entitlementFeatures();
+  return required.some(feature => features.includes(feature));
+}
+
+function planPagesForRole(role) {
+  return rolePages(role).filter(planAllowsPage);
+}
+
+function renderPlanLocked(root, page) {
+  const e = state.entitlements || {};
+  const required = PAGE_FEATURES[page] || [];
+  const reason = !e.valid
+    ? `Your MotoPOS license is ${e.status || "inactive"}. Renew or activate a plan to continue using shop operations.`
+    : `${navLabel(page)} is not included in your current ${e.plan_name || e.plan_code || "MotoPOS"} plan.`;
+
+  root.innerHTML = `
+    ${head("Plan access required", navLabel(page))}
+    <div class="card plan-lock-card">
+      <span class="kicker">MotoPOS entitlement</span>
+      <h2>${esc(reason)}</h2>
+      ${required.length ? `<p>Required entitlement: <strong>${esc(required.map(featureLabel).join(" or "))}</strong></p>` : ""}
+      <div class="actions">
+        <a class="btn btn-primary" href="#/dashboard/license">View license & plan</a>
+        <a class="btn btn-secondary" href="#/dashboard/support">Contact support</a>
+      </div>
+    </div>
+  `;
+}
+
+function recommendedLicenseDate(cycle) {
+  const date = new Date();
+  if (cycle === "monthly") date.setMonth(date.getMonth() + 1);
+  else if (cycle === "annual") date.setFullYear(date.getFullYear() + 1);
+  return date.toISOString().slice(0,10);
+}
+
 async function functionErrorDetails(error) {
   if (!error) return null;
   try {
