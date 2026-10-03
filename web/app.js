@@ -105,7 +105,7 @@ function currentPath() {
 
 function rolePages(role) {
   const r = String(role || "").toLowerCase();
-  const full = ["overview","sales","inventory","customers","staff","service","suppliers","operations","reports","support","license","devices","settings"];
+  const full = ["overview","sales","inventory","customers","staff","service","suppliers","operations","branches","reports","support","license","devices","settings"];
   if (["owner","admin","manager"].includes(r)) return full;
   if (r === "cashier") return ["overview","sales","customers","service","operations","support","license"];
   if (r === "inventory") return ["overview","inventory","suppliers","operations","support","license"];
@@ -116,7 +116,7 @@ function rolePages(role) {
 function navLabel(page) {
   return ({
     overview:"Overview", sales:"Sales", inventory:"Inventory", customers:"Customers",
-    staff:"Staff", service:"Service Jobs", suppliers:"Suppliers", operations:"Operations", reports:"Reports",
+    staff:"Staff", service:"Service Jobs", suppliers:"Suppliers", operations:"Operations", branches:"Branches", reports:"Reports",
     support:"Support Chat", license:"License", devices:"Devices", settings:"Settings"
   })[page] || page;
 }
@@ -841,6 +841,7 @@ async function loadDashboardPage(page) {
       case "service": return await pageService(root);
       case "suppliers": return await pageSuppliers(root);
       case "operations": return await pageOperations(root);
+      case "branches": return await pageBranches(root);
       case "reports": return await pageReports(root);
       case "support": return await pageSupport(root);
       case "license": return await pageLicense(root);
@@ -1409,6 +1410,131 @@ async function pageOperations(root) {
   });
 }
 
+
+
+async function pageBranches(root) {
+  const [memberRes,groupRes,transferRes] = await Promise.all([
+    supabase.from("shop_members")
+      .select("shop_id,role,is_active,shop:shops(id,name,address,phone)")
+      .eq("user_id",state.user.id).eq("is_active",true),
+    supabase.from("shop_groups")
+      .select("id,name,created_at,shops:shop_group_shops(shop_id,shop:shops(id,name,address))")
+      .eq("owner_user_id",state.user.id).order("created_at",{ascending:false}),
+    supabase.from("stock_transfers")
+      .select("id,transfer_number,from_shop_id,to_shop_id,status,notes,created_at,shipped_at,received_at")
+      .or("from_shop_id.eq."+state.shop.id+",to_shop_id.eq."+state.shop.id)
+      .order("created_at",{ascending:false}).limit(50)
+  ]);
+  if(memberRes.error) throw memberRes.error;
+  if(groupRes.error) throw groupRes.error;
+  if(transferRes.error) throw transferRes.error;
+
+  const memberships=(memberRes.data||[]).filter(m=>m.shop);
+  const branches=memberships.map(m=>({...m.shop,role:m.role}));
+  const groups=groupRes.data||[];
+  const transfers=transferRes.data||[];
+  const otherBranches=branches.filter(b=>b.id!==state.shop.id);
+  const productsRes=await supabase.from("products").select("id,name,sku,stock_quantity,cost_price").eq("shop_id",state.shop.id).eq("is_active",true).order("name");
+  if(productsRes.error) throw productsRes.error;
+  const products=productsRes.data||[];
+
+  root.innerHTML=`
+    ${head("Branches & Stock Transfers","Centralized control for shops linked to your MotoPOS account",
+      '<div class="actions">'+
+      (branches.length>1?'<button id="new-group" class="btn btn-secondary">Create branch group</button>':'')+
+      (otherBranches.length?'<button id="new-transfer" class="btn btn-primary">New stock transfer</button>':'')+
+      '</div>'
+    )}
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Accessible branches</div><div class="metric-value">${number(branches.length)}</div><div class="metric-sub">Your active shop memberships</div></article>
+      <article class="metric"><div class="metric-label">Branch groups</div><div class="metric-value">${number(groups.length)}</div><div class="metric-sub">Owner-managed groups</div></article>
+      <article class="metric"><div class="metric-label">Open transfers</div><div class="metric-value">${number(transfers.filter(t=>!["received","cancelled"].includes(t.status)).length)}</div><div class="metric-sub">Inbound / outbound</div></article>
+      <article class="metric"><div class="metric-label">Current branch</div><div class="metric-value" style="font-size:18px">${esc(state.shop.name)}</div><div class="metric-sub">Source for new transfers</div></article>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <div class="card-title"><h3>Your branches</h3><span>${branches.length} accessible</span></div>
+        <div class="stat-list">
+          ${branches.map(b=>`<div class="stat-row"><span><strong>${esc(b.name)}</strong><br><small>${esc(b.address||"No address")}</small></span><strong>${pill(b.role)}</strong></div>`).join("")||'<div class="empty"><strong>No branches</strong>No shop memberships found.</div>'}
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><h3>Branch groups</h3><span>Centralized organization</span></div>
+        <div class="stat-list">
+          ${groups.map(g=>`<div class="stat-row"><span><strong>${esc(g.name)}</strong><br><small>${(g.shops||[]).map(x=>esc(x.shop?.name||"Branch")).join(" • ")}</small></span><strong>${number((g.shops||[]).length)} branch(es)</strong></div>`).join("")||'<div class="empty"><strong>No branch group yet</strong>Create one after your account has access to multiple shops.</div>'}
+        </div>
+      </div>
+    </section>
+
+    <div style="height:14px"></div>
+    <div class="table-wrap"><table><thead><tr><th>Transfer</th><th>Direction</th><th>Status</th><th>Created</th><th>Manage</th></tr></thead><tbody>
+      ${transfers.map(t=>{
+        const from=branches.find(b=>b.id===t.from_shop_id)?.name||t.from_shop_id.slice(0,8);
+        const to=branches.find(b=>b.id===t.to_shop_id)?.name||t.to_shop_id.slice(0,8);
+        return `<tr><td><strong>${esc(t.transfer_number)}</strong><div class="help">${esc(t.notes||"")}</div></td><td>${esc(from)} → ${esc(to)}</td><td>${pill(t.status)}</td><td>${niceDate(t.created_at,true)}</td><td><div class="actions">${t.status==="requested"&&t.from_shop_id===state.shop.id?'<button class="btn btn-secondary btn-sm ship-transfer" data-id="'+t.id+'">Ship</button>':""}${t.status==="shipped"&&t.to_shop_id===state.shop.id?'<button class="btn btn-primary btn-sm receive-transfer" data-id="'+t.id+'">Receive</button>':""}</div></td></tr>`;
+      }).join("")||'<tr><td colspan="5">No stock transfers yet.</td></tr>'}
+    </tbody></table></div>`;
+
+  document.querySelector("#new-group")?.addEventListener("click",()=>{
+    showModal(`
+      <h2>Create branch group</h2>
+      <p>Groups make it easier to organize several shops under one owner account.</p>
+      <form id="branch-group-form" class="form">
+        <div class="field"><label>Group name</label><input class="input" name="name" required placeholder="MotoPOS Main Group"></div>
+        <div class="field"><label>Branches</label>
+          ${branches.map(b=>'<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="shop" value="'+esc(b.id)+'" checked> '+esc(b.name)+'</label>').join("")}
+        </div>
+        <div class="modal-actions"><button type="button" id="close-group" class="btn btn-secondary">Cancel</button><button class="btn btn-primary" type="submit">Create group</button></div>
+      </form>`);
+    document.querySelector("#close-group")?.addEventListener("click",closeModal);
+    document.querySelector("#branch-group-form")?.addEventListener("submit",async e=>{
+      e.preventDefault(); const fd=new FormData(e.currentTarget); const ids=fd.getAll("shop").map(String);
+      const r=await supabase.rpc("create_shop_group",{p_name:String(fd.get("name")||"").trim(),p_shop_ids:ids});
+      if(r.error) return toast(friendlyError(r.error),"error");
+      closeModal(); toast("Branch group created.","success"); await pageBranches(root);
+    });
+  });
+
+  document.querySelector("#new-transfer")?.addEventListener("click",()=>{
+    showModal(`
+      <h2>New stock transfer</h2>
+      <p>Move inventory from <strong>${esc(state.shop.name)}</strong> to another branch.</p>
+      <form id="transfer-form" class="form">
+        <div class="field"><label>Destination branch</label><select class="input" name="to_shop">${otherBranches.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join("")}</select></div>
+        <div class="field"><label>Product</label><select class="input" name="product">${products.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+' · '+esc(p.sku)+' · stock '+number(p.stock_quantity)+'</option>').join("")}</select></div>
+        <div class="field"><label>Quantity</label><input class="input" type="number" name="qty" min="0.01" step="0.01" value="1" required></div>
+        <div class="field"><label>Notes</label><textarea class="input" name="notes"></textarea></div>
+        <div class="help">Create one transfer per product from this quick form. Additional multi-line transfer editing can be added later without changing the backend.</div>
+        <div class="modal-actions"><button type="button" id="close-transfer" class="btn btn-secondary">Cancel</button><button class="btn btn-primary" type="submit">Create transfer</button></div>
+      </form>`);
+    document.querySelector("#close-transfer")?.addEventListener("click",closeModal);
+    document.querySelector("#transfer-form")?.addEventListener("submit",async e=>{
+      e.preventDefault(); const fd=new FormData(e.currentTarget);
+      const r=await supabase.rpc("create_stock_transfer",{
+        p_from_shop_id:state.shop.id,
+        p_to_shop_id:String(fd.get("to_shop")),
+        p_items:[{from_product_id:String(fd.get("product")),quantity:Number(fd.get("qty")||0)}],
+        p_notes:String(fd.get("notes")||"").trim()||null
+      });
+      if(r.error) return toast(friendlyError(r.error),"error");
+      closeModal(); toast("Stock transfer created.","success"); await pageBranches(root);
+    });
+  });
+
+  root.querySelectorAll(".ship-transfer").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm("Deduct source stock and mark this transfer shipped?")) return;
+    const r=await supabase.rpc("ship_stock_transfer",{p_transfer_id:btn.dataset.id});
+    if(r.error) return toast(friendlyError(r.error),"error");
+    toast("Transfer shipped.","success"); await pageBranches(root);
+  }));
+  root.querySelectorAll(".receive-transfer").forEach(btn=>btn.addEventListener("click",async()=>{
+    if(!confirm("Receive this transfer and add stock to the destination branch?")) return;
+    const r=await supabase.rpc("receive_stock_transfer",{p_transfer_id:btn.dataset.id});
+    if(r.error) return toast(friendlyError(r.error),"error");
+    toast("Transfer received and inventory updated.","success"); await pageBranches(root);
+  }));
+}
 
 async function pageReports(root) {
   const [analyticsRes,salesRes] = await Promise.all([
