@@ -25,7 +25,8 @@ const state = {
   authMode: "signin",
   busy: false,
   supportThreadId: null,
-  supportChannel: null
+  supportChannel: null,
+  entitlements: null
 };
 
 const money = value => new Intl.NumberFormat("en-PH", {
@@ -35,6 +36,11 @@ const money = value => new Intl.NumberFormat("en-PH", {
 }).format(Number(value || 0));
 
 const number = value => new Intl.NumberFormat("en-PH").format(Number(value || 0));
+const peso = value => new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0
+}).format(Number(value || 0));
 const esc = value => String(value ?? "")
   .replaceAll("&", "&amp;")
   .replaceAll("<", "&lt;")
@@ -176,6 +182,7 @@ async function loadAccessContext() {
   state.membership = null;
   state.shop = null;
   state.isSystemAdmin = false;
+  state.entitlements = null;
 
   if (!state.user) return;
 
@@ -199,8 +206,17 @@ async function loadAccessContext() {
   state.membership = memberRes.data || null;
   state.shop = memberRes.data?.shop || null;
   state.isSystemAdmin = Boolean(adminRes.data);
-}
 
+  if (state.shop?.id) {
+    const { data, error } = await supabase.rpc("get_shop_entitlements", { p_shop_id: state.shop.id });
+    if (error) {
+      console.warn("Entitlement load:", error.message);
+      state.entitlements = { valid: false, status: "unavailable", features: [] };
+    } else {
+      state.entitlements = data || { valid: false, status: "unlicensed", features: [] };
+    }
+  }
+}
 function renderEmailVerified() {
   const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
   const errorDescription = hashParams.get("error_description");
