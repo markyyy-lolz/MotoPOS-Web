@@ -490,3 +490,21 @@ table{width:100%;border-collapse:collapse;min-width:700px}th,td{text-align:left;
   .portal-form-actions,.portal-footer{align-items:stretch;flex-direction:column}
   .portal-form-actions .btn{width:100%}
 }
+
+
+/* MotoPOS plan entitlements v2 */
+.plan-feature-list{display:flex;flex-direction:column;gap:7px;margin:16px 0 18px;padding:14px;border-radius:16px;background:rgba(59,130,246,.055);border:1px solid rgba(59,130,246,.12)}
+.plan-feature-list span{font-size:12px;color:#d3deed;line-height:1.35}
+.plan-feature-list .muted{color:var(--muted)}
+.entitlement-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.entitlement-grid.compact{grid-column:1/-1;margin-top:4px}
+.entitlement-chip{display:inline-flex;align-items:center;gap:5px;padding:7px 9px;border-radius:999px;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.16);color:#bbf7d0;font-size:11px;font-weight:800}
+.plan-lock-card{max-width:760px;border-color:rgba(245,158,11,.24)!important;background:linear-gradient(145deg,rgba(245,158,11,.06),rgba(17,34,57,.78))!important}
+.plan-lock-card h2{font-size:24px;line-height:1.35;letter-spacing:-.025em;margin:8px 0 10px}
+.plan-lock-card p{color:var(--muted);line-height:1.6}
+.license-plan-preview{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;border:1px solid rgba(59,130,246,.18);border-radius:16px;background:rgba(59,130,246,.055)}
+.license-plan-preview>div{display:flex;flex-direction:column;gap:4px}
+.license-plan-preview strong{font-size:13px}
+.license-plan-preview span{font-size:11px;color:var(--muted);line-height:1.45}
+.stat-row span small{display:block;margin-top:3px;color:var(--muted);font-size:10px}
+@media(max-width:620px){.license-plan-preview{grid-template-columns:1fr}}
