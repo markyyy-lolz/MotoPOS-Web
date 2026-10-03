@@ -391,26 +391,38 @@ function renderManual() {
     },
     {
       id: "v2-operations",
-      title: "MotoPOS 2.0 Operations",
+      title: "MotoPOS 2.1 Production POS",
       eyebrow: "V2",
-      summary: "Shifts, refunds, approvals, quotations, purchasing, offline POS, warranty, rewards, bookings and multi-branch tools.",
+      summary: "Production register control, split payments, Z-reports, partial returns, stocktake, receivables, workshop and multi-branch operations.",
       body: `
         <h3>Cashier shifts & daily control</h3>
         <p>Use <strong>Operations</strong> to start a cashier shift with opening cash and close it using the actual drawer amount. MotoPOS calculates expected cash and variance from recorded cash sales and cash refunds.</p>
+        <h3>Cash drawer & Z-report</h3>
+        <p>During an open shift, authorized staff can record Cash In and Cash Out with a reason. Closing the shift compares the physical drawer with expected cash and stores a Z-report containing cash/non-cash sales, refunds, drawer movements, discounts, tax, transactions and variance.</p>
+        <h3>Split payments & customer credit</h3>
+        <p>A checkout can combine Cash, GCash, Maya, Card, Bank, Store Credit, Customer Credit and Other payment rows. Digital methods require a reference. Customer Credit creates a receivable that can be collected later without changing the original sale.</p>
+        <h3>Hold / Park Sale</h3>
+        <p>Park an unfinished cart and recall it later. Holding a cart does not reduce inventory; stock changes only when checkout is committed.</p>
         <h3>Manager PIN approvals</h3>
         <p>Owners, admins and managers can set a 4–8 digit Manager Approval PIN. Protected actions such as voids and refunds require a valid manager PIN.</p>
-        <h3>Refunds and voids</h3>
-        <p>Completed sales can be voided or refunded from Android Operations. MotoPOS restores eligible stock, records inventory movements, updates payment/sale status and keeps an audit trail.</p>
+        <h3>Partial returns, refunds and voids</h3>
+        <p>Completed sales support item-by-item and quantity-based returns with optional restocking. Full voids and refunds reverse the appropriate inventory/account effects and are protected by manager approval and audit logs.</p>
+        <h3>Price override & cashier discount limit</h3>
+        <p>Authorized users can override an item price for a transaction. Cashiers are required to enter a Manager PIN when a price override or discount exceeds the shop's configured limit.</p>
         <h3>Camera barcode scanner</h3>
         <p>In Android POS, press the scanner icon in the product search field. Matching barcode/SKU products are added directly to the cart.</p>
         <h3>Offline POS & sync queue</h3>
         <p>The Android POS caches products, customers and motorcycle records locally. If the cloud becomes unavailable during checkout, the sale is stored on the device with a unique transaction key and synchronized when connectivity returns. Offline transactions remain provisional until cloud sync succeeds.</p>
+        <h3>Physical stocktake</h3>
+        <p>Inventory staff can start a stocktake, enter physical counts and submit variances. Owners/admins/managers approve the count before MotoPOS posts stock adjustments and inventory movement history.</p>
         <h3>Purchase orders & receiving</h3>
         <p>Use Suppliers & Purchasing to build purchase orders with multiple products. Receiving updates product stock, cost and inventory movement history.</p>
         <h3>Quotations & estimates</h3>
         <p>Create estimates for parts, services and labor. Quotes linked to a customer and motorcycle can be converted directly into Job Orders.</p>
         <h3>Technician timer</h3>
         <p>Mechanics can start and stop timers on active service jobs to record actual work duration.</p>
+        <h3>Maintenance reminders</h3>
+        <p>Create a reminder for a customer motorcycle using a due date, due odometer, or both, then mark it completed after the maintenance visit.</p>
         <h3>Warranty & claims</h3>
         <p>Products with warranty days automatically generate warranty coverage when sold. Warranty claims are managed in Operations.</p>
         <h3>Loyalty & store credit</h3>
