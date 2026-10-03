@@ -1098,16 +1098,90 @@ function openStockModal(root, product) {
   });
 }
 
+
 async function pageCustomers(root) {
   const { data, error } = await supabase.from("customers")
-    .select("id,name,phone,email,address,created_at")
-    .eq("shop_id",state.shop.id).order("name").limit(200);
+    .select("id,name,phone,email,address,loyalty_points,store_credit_balance,created_at")
+    .eq("shop_id",state.shop.id).order("name").limit(300);
   if (error) throw error;
+  const customers=data||[];
   root.innerHTML = `
-    ${head("Customers","Customer directory connected to motorcycle and service records")}
-    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Since</th></tr></thead><tbody>
-      ${(data||[]).map(c=>`<tr><td><strong>${esc(c.name)}</strong></td><td>${esc(c.phone||"—")}</td><td>${esc(c.email||"—")}</td><td>${esc(c.address||"—")}</td><td>${niceDate(c.created_at)}</td></tr>`).join("") || '<tr><td colspan="5">No customers yet.</td></tr>'}
+    ${head("Customers","Customer directory, rewards, store credit and secure customer portal")}
+    <div class="table-wrap"><table><thead><tr><th>Name</th><th>Phone</th><th>Loyalty</th><th>Store credit</th><th>Since</th><th>Manage</th></tr></thead><tbody>
+      ${customers.map(c=>`<tr>
+        <td><strong>${esc(c.name)}</strong><div class="help">${esc(c.email||c.address||"No extra contact info")}</div></td>
+        <td>${esc(c.phone||"—")}</td>
+        <td><strong>${number(c.loyalty_points||0)}</strong> pts</td>
+        <td><strong>${money(c.store_credit_balance||0)}</strong></td>
+        <td>${niceDate(c.created_at)}</td>
+        <td><button class="btn btn-secondary btn-sm customer-tools" data-id="${c.id}">Customer tools</button></td>
+      </tr>`).join("") || '<tr><td colspan="6">No customers yet.</td></tr>'}
     </tbody></table></div>`;
+
+  root.querySelectorAll(".customer-tools").forEach(btn=>{
+    const customer=customers.find(x=>x.id===btn.dataset.id);
+    btn.addEventListener("click",()=>openCustomerTools(root,customer));
+  });
+}
+
+function openCustomerTools(root, customer) {
+  showModal(`
+    <h2>${esc(customer.name)}</h2>
+    <p>Manage loyalty, store credit, and secure portal access.</p>
+    <div class="grid-2" style="margin-bottom:14px">
+      <div class="card"><div class="metric-label">Loyalty points</div><div class="metric-value">${number(customer.loyalty_points||0)}</div></div>
+      <div class="card"><div class="metric-label">Store credit</div><div class="metric-value">${money(customer.store_credit_balance||0)}</div></div>
+    </div>
+    <form id="rewards-form" class="form">
+      <div class="grid-2">
+        <div class="field"><label>Points adjustment</label><input class="input" type="number" name="points" value="0"></div>
+        <div class="field"><label>Store credit adjustment</label><input class="input" type="number" step="0.01" name="credit" value="0"></div>
+      </div>
+      <div class="field"><label>Reason</label><input class="input" name="reason" value="Manual customer adjustment" required></div>
+      <div class="modal-actions"><button type="submit" class="btn btn-secondary">Apply balance changes</button></div>
+    </form>
+    <div style="height:12px"></div>
+    <div class="card">
+      <div class="card-title"><h3>Customer Portal</h3><span>Secure expiring link</span></div>
+      <div class="help">Generate a private 30-day link where the customer can view motorcycles, jobs, warranty coverage, loyalty/store credit and request appointments.</div>
+      <div class="modal-actions"><button id="generate-portal-link" class="btn btn-primary">Generate & copy portal link</button></div>
+      <div id="portal-link-result"></div>
+    </div>
+    <div class="modal-actions"><button id="close-customer-tools" class="btn btn-secondary">Done</button></div>
+  `);
+
+  document.querySelector("#close-customer-tools")?.addEventListener("click",closeModal);
+
+  document.querySelector("#rewards-form")?.addEventListener("submit",async e=>{
+    e.preventDefault();
+    const fd=new FormData(e.currentTarget);
+    const points=Number(fd.get("points")||0);
+    const credit=Number(fd.get("credit")||0);
+    const reason=String(fd.get("reason")||"Manual adjustment").trim();
+
+    if(points!==0){
+      const r=await supabase.rpc("adjust_loyalty_points",{p_customer_id:customer.id,p_points:Math.trunc(points),p_reason:reason});
+      if(r.error) return toast(friendlyError(r.error),"error");
+    }
+    if(credit!==0){
+      const r=await supabase.rpc("adjust_store_credit",{p_customer_id:customer.id,p_amount:credit,p_reason:reason});
+      if(r.error) return toast(friendlyError(r.error),"error");
+    }
+    toast("Customer balances updated.","success");
+    closeModal();
+    await pageCustomers(root);
+  });
+
+  document.querySelector("#generate-portal-link")?.addEventListener("click",async()=>{
+    const r=await supabase.rpc("create_customer_portal_token",{p_customer_id:customer.id,p_days:30});
+    if(r.error) return toast(friendlyError(r.error),"error");
+    const token=String(r.data||"").replace(/^"|"$/g,"");
+    const url=location.origin+location.pathname+"#/portal?token="+encodeURIComponent(token);
+    try{ await navigator.clipboard.writeText(url); }catch(_){}
+    const box=document.querySelector("#portal-link-result");
+    if(box) box.innerHTML='<div class="key-box" style="margin-top:12px">'+esc(url)+'</div>';
+    toast("Customer portal link generated and copied.","success");
+  });
 }
 
 async function pageStaff(root) {
