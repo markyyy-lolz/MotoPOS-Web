@@ -390,6 +390,40 @@ function renderManual() {
       `
     },
     {
+      id: "v2-operations",
+      title: "MotoPOS 2.0 Operations",
+      eyebrow: "V2",
+      summary: "Shifts, refunds, approvals, quotations, purchasing, offline POS, warranty, rewards, bookings and multi-branch tools.",
+      body: `
+        <h3>Cashier shifts & daily control</h3>
+        <p>Use <strong>Operations</strong> to start a cashier shift with opening cash and close it using the actual drawer amount. MotoPOS calculates expected cash and variance from recorded cash sales and cash refunds.</p>
+        <h3>Manager PIN approvals</h3>
+        <p>Owners, admins and managers can set a 4–8 digit Manager Approval PIN. Protected actions such as voids and refunds require a valid manager PIN.</p>
+        <h3>Refunds and voids</h3>
+        <p>Completed sales can be voided or refunded from Android Operations. MotoPOS restores eligible stock, records inventory movements, updates payment/sale status and keeps an audit trail.</p>
+        <h3>Camera barcode scanner</h3>
+        <p>In Android POS, press the scanner icon in the product search field. Matching barcode/SKU products are added directly to the cart.</p>
+        <h3>Offline POS & sync queue</h3>
+        <p>The Android POS caches products, customers and motorcycle records locally. If the cloud becomes unavailable during checkout, the sale is stored on the device with a unique transaction key and synchronized when connectivity returns. Offline transactions remain provisional until cloud sync succeeds.</p>
+        <h3>Purchase orders & receiving</h3>
+        <p>Use Suppliers & Purchasing to build purchase orders with multiple products. Receiving updates product stock, cost and inventory movement history.</p>
+        <h3>Quotations & estimates</h3>
+        <p>Create estimates for parts, services and labor. Quotes linked to a customer and motorcycle can be converted directly into Job Orders.</p>
+        <h3>Technician timer</h3>
+        <p>Mechanics can start and stop timers on active service jobs to record actual work duration.</p>
+        <h3>Warranty & claims</h3>
+        <p>Products with warranty days automatically generate warranty coverage when sold. Warranty claims are managed in Operations.</p>
+        <h3>Loyalty & store credit</h3>
+        <p>Customers earn loyalty points automatically on completed sales and balances can also be adjusted by authorized staff. Store-credit refunds are supported and customer balances are visible in the portal.</p>
+        <h3>Customer Portal & booking</h3>
+        <p>Generate a private, expiring portal link for a customer. They can view motorcycles, job history, warranties, loyalty/store credit and request service appointments.</p>
+        <h3>Multi-branch & stock transfers</h3>
+        <p>Owners/managers with access to multiple shops can organize branch groups and transfer inventory between branches. Stock is deducted when shipped and added only when the destination receives the transfer.</p>
+        <h3>Advanced analytics</h3>
+        <p>Reports now include 30-day revenue, gross profit, operating net, average ticket and top-selling products.</p>
+      `
+    },
+    {
       id: "troubleshooting",
       title: "Troubleshooting",
       eyebrow: "13",
