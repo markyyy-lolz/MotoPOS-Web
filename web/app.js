@@ -2307,21 +2307,79 @@ async function loadAdminSupport() {
   await renderSupportChatPanel(document.querySelector("#admin-support-panel"),state.supportThreadId,true);
 }
 
-function openLicenseModal(shopId, shopName) {
-  const date = new Date(); date.setFullYear(date.getFullYear()+1);
-  const expires = date.toISOString().slice(0,10);
+async function openLicenseModal(shopId, shopName) {
+  const { data: plans, error } = await supabase
+    .from("license_plans")
+    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
+    .eq("is_active",true)
+    .order("sort_order");
+
+  if (error || !plans?.length) {
+    toast(friendlyError(error || new Error("No active plans found.")),"error");
+    return;
+  }
+
+  const planMap = Object.fromEntries(plans.map(plan => [plan.code, plan]));
   showModal(`
-    <h2>Issue MotoPOS license</h2>
-    <p>${esc(shopName)} · A new key will replace the previous activation key for this shop.</p>
+    <h2>Issue / renew MotoPOS license</h2>
+    <p>${esc(shopName)} · Plan defaults load automatically. Device and staff limits can still be overridden for special contracts.</p>
     <form id="license-form" class="form">
       <input type="hidden" name="shop_id" value="${esc(shopId)}">
-      <div class="field"><label>Plan</label><select class="input" name="plan"><option value="basic">Basic</option><option value="pro" selected>Pro</option><option value="business">Business</option></select></div>
-      <div class="field"><label>Expiration date</label><input class="input" type="date" name="expires" value="${expires}"></div>
-      <div class="grid-2"><div class="field"><label>Max devices</label><input class="input" type="number" min="1" name="devices" value="3"></div><div class="field"><label>Max staff</label><input class="input" type="number" min="1" name="staff" value="10"></div></div>
+      <div class="grid-2">
+        <div class="field"><label>Plan</label><select class="input" name="plan" id="license-plan">
+          ${plans.map(plan => `<option value="${esc(plan.code)}" ${plan.code==="pro"?"selected":""}>${esc(plan.name)}</option>`).join("")}
+        </select></div>
+        <div class="field"><label>Billing cycle</label><select class="input" name="cycle" id="license-cycle">
+          <option value="monthly">Monthly</option>
+          <option value="annual" selected>Annual</option>
+          <option value="custom">Custom term</option>
+        </select></div>
+      </div>
+      <div id="license-plan-preview" class="license-plan-preview"></div>
+      <div class="field"><label>Expiration date</label><input class="input" type="date" name="expires" id="license-expires"></div>
+      <div class="grid-2">
+        <div class="field"><label>Max devices</label><input class="input" type="number" min="1" name="devices" id="license-devices"></div>
+        <div class="field"><label>Max staff</label><input class="input" type="number" min="1" name="staff" id="license-staff"></div>
+      </div>
+      <div class="help">Changing the plan resets limits to that plan's defaults. Manual changes are treated as administrator overrides.</div>
       <div class="modal-actions"><button type="button" id="close-license" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Generate license</button></div>
     </form>`);
+
+  const planSelect = document.querySelector("#license-plan");
+  const cycleSelect = document.querySelector("#license-cycle");
+  const expiresInput = document.querySelector("#license-expires");
+  const devicesInput = document.querySelector("#license-devices");
+  const staffInput = document.querySelector("#license-staff");
+  const preview = document.querySelector("#license-plan-preview");
+
+  function refreshPlan(resetLimits = false) {
+    const plan = planMap[planSelect?.value] || plans[0];
+    const cycle = cycleSelect?.value || "annual";
+    if (resetLimits) {
+      if (devicesInput) devicesInput.value = plan.default_max_devices;
+      if (staffInput) staffInput.value = plan.default_max_staff;
+    }
+    if (expiresInput && cycle !== "custom") expiresInput.value = recommendedLicenseDate(cycle);
+
+    const price = cycle === "monthly"
+      ? plan.monthly_price_php
+      : cycle === "annual"
+        ? plan.annual_price_php
+        : null;
+    const features = Array.isArray(plan.features) ? plan.features : [];
+
+    if (preview) preview.innerHTML = `
+      <div><strong>${esc(plan.name)}</strong><span>${esc(plan.description || "")}</span></div>
+      <div><strong>${price == null ? "Custom billing" : peso(price)}</strong><span>${number(plan.default_max_devices)} devices · ${number(plan.default_max_staff)} staff · ${number(plan.default_offline_grace_days)}-day offline grace</span></div>
+      <div class="entitlement-grid compact">${features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("")}</div>
+    `;
+  }
+
+  planSelect?.addEventListener("change",()=>refreshPlan(true));
+  cycleSelect?.addEventListener("change",()=>refreshPlan(false));
   document.querySelector("#close-license")?.addEventListener("click",closeModal);
   document.querySelector("#license-form")?.addEventListener("submit",issueLicense);
+  refreshPlan(true);
 }
 
 async function issueLicense(event) {
@@ -2331,25 +2389,32 @@ async function issueLicense(event) {
   button.disabled=true; button.textContent="Generating…";
   const expiresRaw = String(f.get("expires")||"");
   const expiresAt = expiresRaw ? new Date(expiresRaw+"T23:59:59+08:00").toISOString() : null;
-  const { data, error } = await supabase.rpc("admin_issue_license", {
+  const cycle = String(f.get("cycle")||"annual");
+
+  const { data, error } = await supabase.rpc("admin_issue_license_v2", {
     p_shop_id:String(f.get("shop_id")),
     p_plan_code:String(f.get("plan")),
+    p_billing_cycle:cycle,
     p_expires_at:expiresAt,
     p_max_devices:Number(f.get("devices"))||null,
     p_max_staff:Number(f.get("staff"))||null
   });
+
   if (error) {
     toast(friendlyError(error),"error"); button.disabled=false; button.textContent="Generate license"; return;
   }
+
   const result = data || {};
   showModal(`
     <h2>License generated</h2>
     <p>Copy this key now. MotoPOS stores only its cryptographic hash, so the full key is not retrievable later.</p>
     <div class="key-box" id="issued-key">${esc(result.license_key||"")}</div>
     <div class="stat-list" style="margin-top:13px">
-      <div class="stat-row"><span>Plan</span><strong>${esc(result.plan_code||"")}</strong></div>
+      <div class="stat-row"><span>Plan</span><strong>${esc(result.plan_name||result.plan_code||"")}</strong></div>
+      <div class="stat-row"><span>Billing</span><strong>${esc(result.billing_cycle||"")}${result.amount_php!=null?` · ${peso(result.amount_php)}`:""}</strong></div>
       <div class="stat-row"><span>Devices</span><strong>${esc(result.max_devices||"")}</strong></div>
       <div class="stat-row"><span>Staff</span><strong>${esc(result.max_staff||"")}</strong></div>
+      <div class="stat-row"><span>Offline grace</span><strong>${esc(result.offline_grace_days||"")} days</strong></div>
       <div class="stat-row"><span>Expires</span><strong>${niceDate(result.expires_at)}</strong></div>
     </div>
     <div class="modal-actions"><button id="copy-key" class="btn btn-primary">Copy key</button><button id="done-key" class="btn btn-secondary">Done</button></div>`);
