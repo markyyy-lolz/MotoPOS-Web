@@ -746,43 +746,47 @@ async function loadPublicPlans() {
   if (!root) return;
   const { data, error } = await supabase
     .from("license_plans")
-    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days")
+    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
     .eq("is_active", true)
-    .order("default_max_devices");
+    .order("sort_order");
+
   if (error || !data?.length) {
-    root.innerHTML = `<div class="empty" style="grid-column:1/-1"><strong>MotoPOS plans</strong>Plan details are available after sign in.</div>`;
+    root.innerHTML = `<div class="empty" style="grid-column:1/-1"><strong>MotoPOS plans</strong>Plan details are temporarily unavailable.</div>`;
     return;
   }
-  const pricing = {
-    basic: { monthly: "₱499", annual: "₱4,990/year", note: "Best for small parts shops" },
-    pro: { monthly: "₱999", annual: "₱9,990/year", note: "Best for full motorcycle shops" },
-    business: { monthly: "₱1,799", annual: "₱17,990/year", note: "Best for larger teams" }
-  };
 
   root.innerHTML = data.map(plan => {
-    const price = pricing[plan.code] || { monthly: "Contact us", annual: "", note: "" };
+    const features = Array.isArray(plan.features) ? plan.features : [];
+    const monthly = plan.monthly_price_php == null ? "Contact us" : peso(plan.monthly_price_php);
+    const annual = plan.annual_price_php == null ? "" : `${peso(plan.annual_price_php)}/year`;
+
     return `
       <article class="price-card ${plan.code === "pro" ? "featured" : ""}">
         ${plan.code === "pro" ? '<div class="price-badge">Most popular</div>' : ""}
         <span class="kicker">${esc(plan.code)}</span>
         <h3>${esc(plan.name)}</h3>
-        <div class="plan-price"><strong>${price.monthly}</strong>${price.monthly.startsWith("₱") ? "<span>/month</span>" : ""}</div>
-        <div class="plan-annual">${esc(price.annual)}</div>
+        <div class="plan-price"><strong>${esc(monthly)}</strong>${plan.monthly_price_php != null ? "<span>/month</span>" : ""}</div>
+        <div class="plan-annual">${esc(annual)}</div>
         <p>${esc(plan.description || "")}</p>
-        <div class="plan-note">${esc(price.note)}</div>
+        <div class="plan-note">${esc(plan.marketing_note || "")}</div>
         <div class="price-meta">
           <strong>${number(plan.default_max_devices)}</strong> device(s)
           <span>·</span>
           <strong>${number(plan.default_max_staff)}</strong> staff
+          <span>·</span>
+          <strong>${number(plan.default_offline_grace_days)}</strong>-day offline grace
         </div>
-        <div class="trial-copy">Includes a free 7-day Pro Trial for new shops.</div>
+        <div class="plan-feature-list">
+          ${features.slice(0,7).map(feature => `<span>✓ ${esc(featureLabel(feature))}</span>`).join("")}
+          ${features.length > 7 ? `<span class="muted">+${features.length - 7} more</span>` : ""}
+        </div>
+        <div class="trial-copy">New shops start with a free 7-day Pro Trial. No card required.</div>
         <a class="btn ${plan.code === "pro" ? "btn-primary" : "btn-secondary"}" href="#/login?mode=signup">Start free trial</a>
       </article>
     `;
   }).join("");
   setupMotion(root);
 }
-
 function renderAuth() {
   const signupFromUrl = location.hash.includes("mode=signup");
   if (signupFromUrl) state.authMode = "signup";
