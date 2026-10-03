@@ -1179,7 +1179,14 @@ async function createStaff(event, root) {
   });
 
   if (error || data?.error) {
-    toast(friendlyError(data?.error || error), "error");
+    const details = error ? await functionErrorDetails(error) : null;
+    const message =
+      data?.error ||
+      details?.error ||
+      details?.message ||
+      details?.msg ||
+      error;
+    toast(friendlyError(message), "error");
     button.disabled = false;
     button.textContent = "Create staff";
     return;
