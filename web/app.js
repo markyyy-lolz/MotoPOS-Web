@@ -105,18 +105,18 @@ function currentPath() {
 
 function rolePages(role) {
   const r = String(role || "").toLowerCase();
-  const full = ["overview","sales","inventory","customers","staff","service","suppliers","reports","support","license","devices","settings"];
+  const full = ["overview","sales","inventory","customers","staff","service","suppliers","operations","reports","support","license","devices","settings"];
   if (["owner","admin","manager"].includes(r)) return full;
-  if (r === "cashier") return ["overview","sales","customers","service","support","license"];
-  if (r === "inventory") return ["overview","inventory","suppliers","support","license"];
-  if (r === "mechanic") return ["overview","customers","service","support","license"];
+  if (r === "cashier") return ["overview","sales","customers","service","operations","support","license"];
+  if (r === "inventory") return ["overview","inventory","suppliers","operations","support","license"];
+  if (r === "mechanic") return ["overview","customers","service","operations","support","license"];
   return ["overview","support","license"];
 }
 
 function navLabel(page) {
   return ({
     overview:"Overview", sales:"Sales", inventory:"Inventory", customers:"Customers",
-    staff:"Staff", service:"Service Jobs", suppliers:"Suppliers", reports:"Reports",
+    staff:"Staff", service:"Service Jobs", suppliers:"Suppliers", operations:"Operations", reports:"Reports",
     support:"Support Chat", license:"License", devices:"Devices", settings:"Settings"
   })[page] || page;
 }
@@ -840,6 +840,7 @@ async function loadDashboardPage(page) {
       case "staff": return await pageStaff(root);
       case "service": return await pageService(root);
       case "suppliers": return await pageSuppliers(root);
+      case "operations": return await pageOperations(root);
       case "reports": return await pageReports(root);
       case "support": return await pageSupport(root);
       case "license": return await pageLicense(root);
