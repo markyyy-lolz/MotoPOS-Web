@@ -475,7 +475,7 @@ function renderManual() {
               <h2>MotoPOS Android + MotoPOS Cloud</h2>
               <p>This manual covers the current core workflows. Features may expand as new MotoPOS versions are released.</p>
             </div>
-            <div class="manual-version">v1.x</div>
+            <div class="manual-version">v2.1.0</div>
           </div>
 
           ${sections.map(s=>`
@@ -694,7 +694,7 @@ function renderAuth() {
           <form id="auth-form" class="form">
             ${signup ? `<div class="field"><label>Display name</label><input class="input" name="display_name" autocomplete="name" required placeholder="Shop owner name"></div>` : ""}
             <div class="field"><label>Email address</label><input class="input" type="email" name="email" autocomplete="email" required placeholder="you@example.com"></div>
-            <div class="field"><label>Password</label><input class="input" type="password" name="password" autocomplete="${signup ? "new-password" : "current-password"}" minlength="6" required placeholder="Minimum 6 characters"></div>
+            <div class="field"><label>Password</label><input class="input" type="password" name="password" autocomplete="${signup ? "new-password" : "current-password"}" minlength="${signup ? 8 : 6}" required placeholder="${signup ? "Minimum 8 characters" : "Your password"}"></div>
             <button class="btn btn-primary" type="submit">${signup ? "Create MotoPOS account" : "Sign in"}</button>
             <a href="#/" class="btn btn-secondary">Back to website</a>
             ${signup ? '<div class="help">If email verification is enabled, verify your email before signing in.</div>' : ""}
