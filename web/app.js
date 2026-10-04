@@ -556,7 +556,7 @@ function renderManual() {
     },
     {
       id: "v2-operations",
-      title: "MotoPOS 2.1 Production POS",
+      title: "MotoPOS 2.2 Production POS",
       eyebrow: "V2",
       summary: "Production register control, split payments, Z-reports, partial returns, stocktake, receivables, workshop and multi-branch operations.",
       body: `
@@ -652,7 +652,7 @@ function renderManual() {
               <h2>MotoPOS Android + MotoPOS Cloud</h2>
               <p>This manual covers the current core workflows. Features may expand as new MotoPOS versions are released.</p>
             </div>
-            <div class="manual-version">v2.1.0</div>
+            <div class="manual-version">v2.2.0</div>
           </div>
 
           ${sections.map(s=>`
