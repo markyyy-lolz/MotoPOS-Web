@@ -844,7 +844,25 @@ async function loadPublicPlans() {
         <a class="btn ${plan.code === "pro" ? "btn-primary" : "btn-secondary"}" href="#/login?mode=signup">Start free trial</a>
       </article>
     `;
-  }).join("");
+  }).join("") + `
+    <article class="price-card">
+      <span class="kicker">custom</span>
+      <h3>Custom MotoPOS</h3>
+      <div class="plan-price"><strong>₱699</strong><span>/month starting</span></div>
+      <div class="plan-annual">Tailored quotation</div>
+      <p>Build a MotoPOS package around your actual shop requirements instead of fixed limits.</p>
+      <div class="plan-note">Final pricing depends on devices, staff accounts, selected modules, branches and support requirements.</div>
+      <div class="price-meta"><strong>Optional</strong> SUNMI V2 hardware</div>
+      <div class="plan-feature-list">
+        <span>✓ Custom device and staff limits</span>
+        <span>✓ Select only the modules you need</span>
+        <span>✓ Multi-branch and support options</span>
+        <span>✓ SUNMI V2 units can be added to the order</span>
+        <span>✓ Hardware is quoted separately from software</span>
+      </div>
+      <div class="trial-copy">Create your shop first, then submit a Custom License Order from MotoPOS Cloud.</div>
+      <a class="btn btn-secondary" href="#/login?mode=signup">Create account</a>
+    </article>`;
   setupMotion(root);
 }
 function renderAuth() {
@@ -2141,7 +2159,7 @@ async function pageLicense(root) {
       : Promise.resolve({data:[],error:null}),
     canManageLicense
       ? supabase.from("license_order_requests")
-          .select("id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,updated_at")
+          .select("id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,sunmi_v2_quantity,hardware_quote_php,admin_notes,created_at,updated_at")
           .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
       : Promise.resolve({data:[],error:null}),
     canManageLicense
@@ -2198,12 +2216,18 @@ async function pageLicense(root) {
 
     ${canManageLicense ? `
       <div class="card custom-license-card" style="margin-top:14px">
-        <div class="card-title"><div><h3>Custom License Orders</h3><span>Build a plan around your shop instead of forcing fixed limits.</span></div><button id="request-custom-license-card" class="btn btn-secondary btn-sm">New custom order</button></div>
+        <div class="card-title"><div><h3>Custom License Orders</h3><span>Starts at ₱699/month. Final pricing depends on devices, staff, modules, branches, support, and optional SUNMI V2 hardware.</span></div><button id="request-custom-license-card" class="btn btn-secondary btn-sm">New custom order</button></div>
         <div class="custom-order-list">
           ${orders.length ? orders.map(order=>`
             <div class="custom-order-row">
-              <div><strong>${esc(order.requested_plan)} · ${esc(order.billing_cycle)}</strong><span>${number(order.desired_devices)} devices · ${number(order.desired_staff)} staff · ${Array.isArray(order.desired_features)?order.desired_features.length:0} modules</span></div>
-              <div><strong>${order.quoted_price_php!=null?peso(order.quoted_price_php):order.budget_php!=null?`Budget ${peso(order.budget_php)}`:"Awaiting quote"}</strong><span>${pill(order.status)} · ${niceDate(order.created_at,true)}</span></div>
+              <div>
+                <strong>${esc(order.requested_plan)} · ${esc(order.billing_cycle)}</strong>
+                <span>${number(order.desired_devices)} devices · ${number(order.desired_staff)} staff · ${Array.isArray(order.desired_features)?order.desired_features.length:0} modules${Number(order.sunmi_v2_quantity||0)>0?` · SUNMI V2 ×${number(order.sunmi_v2_quantity)}`:""}</span>
+              </div>
+              <div>
+                <strong>${order.quoted_price_php!=null?`Software ${peso(order.quoted_price_php)}`:order.budget_php!=null?`Budget ${peso(order.budget_php)}`:"Awaiting quote"}</strong>
+                <span>${order.hardware_quote_php!=null?`SUNMI V2 hardware ${peso(order.hardware_quote_php)} · `:""}${pill(order.status)} · ${niceDate(order.created_at,true)}</span>
+              </div>
             </div>`).join("") : '<div class="help">No custom orders yet.</div>'}
         </div>
       </div>
@@ -2286,7 +2310,8 @@ async function openCustomLicenseRequest(root) {
 
   showModal(`
     <h2>Request a custom MotoPOS license</h2>
-    <p>Choose a base plan, then customize modules, device/staff limits, term and target budget. MotoPOS will review the request and send a quote.</p>
+    <p><strong>Custom MotoPOS licenses start at ₱699/month.</strong> Final pricing depends on devices, staff accounts, selected modules, branches, support requirements, and optional hardware such as the SUNMI V2.</p>
+    <div class="verify-note"><strong>Software + hardware</strong><span>SUNMI V2 hardware is optional and quoted separately from the MotoPOS software license.</span></div>
     <form id="custom-license-request-form" class="form">
       <div class="grid-2">
         <div class="field"><label>Base plan</label><select class="input" name="plan" id="custom-order-plan">${plans.map(p=>`<option value="${esc(p.code)}" ${p.code==="pro"?"selected":""}>${esc(p.name)}</option>`).join("")}</select></div>
@@ -2296,7 +2321,10 @@ async function openCustomLicenseRequest(root) {
         <div class="field"><label>Devices needed</label><input class="input" type="number" min="1" max="500" name="devices" id="custom-order-devices" required></div>
         <div class="field"><label>Staff accounts needed</label><input class="input" type="number" min="1" max="5000" name="staff" id="custom-order-staff" required></div>
       </div>
-      <div class="field"><label>Target budget (₱, optional)</label><input class="input" type="number" min="0" step="0.01" name="budget" placeholder="Tell us your preferred budget"></div>
+      <div class="grid-2">
+        <div class="field"><label>Target software budget (₱, optional)</label><input class="input" type="number" min="0" step="0.01" name="budget" placeholder="Starts at ₱699/month"></div>
+        <div class="field"><label>SUNMI V2 units (optional)</label><input class="input" type="number" min="0" max="100" step="1" name="sunmi_v2_quantity" value="0"><div class="help">Hardware price is quoted separately.</div></div>
+      </div>
       <div class="field"><label>Modules</label><div class="feature-picker" id="custom-order-features">
         ${allFeatures.map(code=>`<label><input type="checkbox" name="feature" value="${esc(code)}"><span>${esc(featureLabel(code))}</span></label>`).join("")}
       </div></div>
@@ -2333,6 +2361,7 @@ async function openCustomLicenseRequest(root) {
       desired_staff:Number(fd.get("staff")||1),
       desired_features:features,
       budget_php:budgetRaw?Number(budgetRaw):null,
+      sunmi_v2_quantity:Number(fd.get("sunmi_v2_quantity")||0),
       notes:String(fd.get("notes")||"").trim()||null
     });
     if(error) return toast(friendlyError(error),"error");
@@ -2593,7 +2622,7 @@ async function loadAdminClients() {
   const [clientRes,orderRes]=await Promise.all([
     supabase.rpc("admin_client_overview_v2"),
     supabase.from("license_order_requests")
-      .select("id,shop_id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,shop:shops(name)")
+      .select("id,shop_id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,sunmi_v2_quantity,hardware_quote_php,admin_notes,created_at,shop:shops(name)")
       .order("created_at",{ascending:false})
       .limit(100)
   ]);
@@ -2627,9 +2656,12 @@ async function loadAdminClients() {
       <div class="table-wrap compact-table"><table><thead><tr><th>Shop</th><th>Request</th><th>Modules</th><th>Budget / quote</th><th>Status</th><th>Actions</th></tr></thead><tbody>
         ${orders.map(o=>`<tr>
           <td><strong>${esc(o.shop?.name||"Shop")}</strong><div class="help">${niceDate(o.created_at,true)}</div></td>
-          <td>${esc(o.requested_plan)} · ${esc(o.billing_cycle)}<div class="help">${number(o.desired_devices)} devices · ${number(o.desired_staff)} staff</div></td>
+          <td>${esc(o.requested_plan)} · ${esc(o.billing_cycle)}<div class="help">${number(o.desired_devices)} devices · ${number(o.desired_staff)} staff${Number(o.sunmi_v2_quantity||0)>0?` · SUNMI V2 ×${number(o.sunmi_v2_quantity)}`:""}</div></td>
           <td>${Array.isArray(o.desired_features)?number(o.desired_features.length):0}<div class="help">${Array.isArray(o.desired_features)?esc(o.desired_features.slice(0,3).map(featureLabel).join(", ")):""}${Array.isArray(o.desired_features)&&o.desired_features.length>3?"…":""}</div></td>
-          <td>${o.quoted_price_php!=null?`<strong>${peso(o.quoted_price_php)}</strong>`:o.budget_php!=null?`Budget ${peso(o.budget_php)}`:"—"}</td>
+          <td>
+            ${o.quoted_price_php!=null?`<strong>Software ${peso(o.quoted_price_php)}</strong>`:o.budget_php!=null?`Budget ${peso(o.budget_php)}`:"—"}
+            ${o.hardware_quote_php!=null?`<div class="help">Hardware ${peso(o.hardware_quote_php)}</div>`:""}
+          </td>
           <td>${pill(o.status)}</td>
           <td><div class="actions"><button class="btn btn-secondary btn-sm review-custom-order" data-id="${o.id}">Review</button>${!["fulfilled","declined","cancelled"].includes(o.status)?`<button class="btn btn-primary btn-sm issue-custom-order" data-id="${o.id}">Issue</button>`:""}</div></td>
         </tr>`).join("")||'<tr><td colspan="6">No custom license orders yet.</td></tr>'}
@@ -2672,13 +2704,18 @@ function openCustomOrderReview(order){
   const features=Array.isArray(order.desired_features)?order.desired_features:[];
   showModal(`
     <h2>Review custom license order</h2>
-    <p><strong>${esc(order.shop?.name||"Shop")}</strong> requested ${number(order.desired_devices)} devices, ${number(order.desired_staff)} staff accounts and ${number(features.length)} modules.</p>
+    <p><strong>${esc(order.shop?.name||"Shop")}</strong> requested ${number(order.desired_devices)} devices, ${number(order.desired_staff)} staff accounts and ${number(features.length)} modules${Number(order.sunmi_v2_quantity||0)>0?`, plus ${number(order.sunmi_v2_quantity)} SUNMI V2 unit(s)`:""}.</p>
+    <div class="verify-note"><strong>Pricing guide</strong><span>Custom MotoPOS starts at ₱699/month. Quote the software license separately from optional SUNMI V2 hardware.</span></div>
     <div class="entitlement-grid compact">${features.map(code=>`<span class="entitlement-chip">✓ ${esc(featureLabel(code))}</span>`).join("")||'<span class="help">No custom modules selected.</span>'}</div>
     ${order.notes?`<div class="verify-note"><strong>Client notes</strong><span>${esc(order.notes)}</span></div>`:""}
     <form id="custom-order-review-form" class="form">
       <div class="grid-2">
         <div class="field"><label>Status</label><select class="input" name="status">${["pending","reviewing","quoted","approved","declined","fulfilled","cancelled"].map(s=>`<option value="${s}" ${order.status===s?"selected":""}>${s}</option>`).join("")}</select></div>
-        <div class="field"><label>Quoted price (₱)</label><input class="input" type="number" min="0" step="0.01" name="quote" value="${esc(order.quoted_price_php??"")}" placeholder="Optional until quoted"></div>
+        <div class="field"><label>Software license quote (₱)</label><input class="input" type="number" min="0" step="0.01" name="quote" value="${esc(order.quoted_price_php??"")}" placeholder="Custom license starts at ₱699/month"></div>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>SUNMI V2 requested</label><input class="input" value="${number(order.sunmi_v2_quantity||0)} unit(s)" disabled></div>
+        <div class="field"><label>SUNMI V2 hardware quote (₱)</label><input class="input" type="number" min="0" step="0.01" name="hardware_quote" value="${esc(order.hardware_quote_php??"")}" placeholder="${Number(order.sunmi_v2_quantity||0)>0?"Enter total hardware quote":"No hardware requested"}" ${Number(order.sunmi_v2_quantity||0)>0?"":"disabled"}></div>
       </div>
       <div class="field"><label>Admin notes</label><textarea class="input" name="admin_notes" maxlength="4000">${esc(order.admin_notes||"")}</textarea></div>
       <div class="modal-actions"><button type="button" id="close-order-review" class="btn btn-secondary">Close</button><button type="button" id="issue-order-now" class="btn btn-secondary">Issue custom license</button><button type="submit" class="btn btn-primary">Save review</button></div>
@@ -2693,9 +2730,11 @@ function openCustomOrderReview(order){
     event.preventDefault();
     const fd=new FormData(event.currentTarget);
     const quoteRaw=String(fd.get("quote")||"").trim();
+    const hardwareQuoteRaw=String(fd.get("hardware_quote")||"").trim();
     const {error}=await supabase.from("license_order_requests").update({
       status:String(fd.get("status")||"reviewing"),
       quoted_price_php:quoteRaw?Number(quoteRaw):null,
+      hardware_quote_php:hardwareQuoteRaw?Number(hardwareQuoteRaw):null,
       admin_notes:String(fd.get("admin_notes")||"").trim()||null,
       reviewed_by:state.user.id,
       reviewed_at:new Date().toISOString(),
