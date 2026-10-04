@@ -2548,41 +2548,60 @@ async function loadAdminHealth(){
 }
 
 
+
 async function loadAdminClients() {
   const root = document.querySelector("#admin-content");
   if (!root) return;
 
-  const [clientRes,orderRes]=await Promise.all([
+  const [clientRes,orderRes,paymentRes]=await Promise.all([
     supabase.rpc("admin_client_overview_v2"),
     supabase.from("license_order_requests")
       .select("id,shop_id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,shop:shops(name)")
       .order("created_at",{ascending:false})
+      .limit(100),
+    supabase.from("license_payment_submissions")
+      .select("id,order_request_id,shop_id,method,reference_number,amount_php,notes,status,admin_notes,created_at,verified_at,shop:shops(name)")
+      .order("created_at",{ascending:false})
       .limit(100)
   ]);
 
-  if (clientRes.error) {
-    root.innerHTML = `<div class="empty"><strong>Unable to load clients</strong>${esc(friendlyError(clientRes.error))}</div>`;
-    return;
-  }
-  if(orderRes.error){
-    root.innerHTML = `<div class="empty"><strong>Unable to load custom license orders</strong>${esc(friendlyError(orderRes.error))}</div>`;
-    return;
+  for(const response of [clientRes,orderRes,paymentRes]){
+    if(response.error){
+      root.innerHTML=`<div class="empty"><strong>Unable to load Developer Control</strong>${esc(friendlyError(response.error))}</div>`;
+      return;
+    }
   }
 
   const clients = clientRes.data || [];
   const orders = orderRes.data || [];
+  const payments = paymentRes.data || [];
   const active = clients.filter(c=>["active","trial"].includes(c.license_status)).length;
   const devices = clients.reduce((sum,c)=>sum+Number(c.device_count||0),0);
   const openOrders=orders.filter(o=>!["fulfilled","declined","cancelled"].includes(o.status));
+  const pendingPayments=payments.filter(p=>p.status==="pending");
 
   root.innerHTML = `
-    ${head("Clients & Licenses","Central control for MotoPOS shops, fixed plans and custom license orders")}
+    ${head("Clients & Licenses","Central control for MotoPOS shops, custom contracts and payment verification")}
     <section class="metrics">
       <article class="metric"><div class="metric-label">Client shops</div><div class="metric-value">${number(clients.length)}</div><div class="metric-sub">Registered workspaces</div></article>
       <article class="metric"><div class="metric-label">Active licenses</div><div class="metric-value">${number(active)}</div><div class="metric-sub">Active or trial</div></article>
       <article class="metric"><div class="metric-label">Active devices</div><div class="metric-value">${number(devices)}</div><div class="metric-sub">Across all clients</div></article>
-      <article class="metric"><div class="metric-label">Custom orders</div><div class="metric-value">${number(openOrders.length)}</div><div class="metric-sub">Need review / quote</div></article>
+      <article class="metric"><div class="metric-label">Payments</div><div class="metric-value">${number(pendingPayments.length)}</div><div class="metric-sub">Awaiting verification</div></article>
     </section>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-title"><h3>Payment verification</h3><span>Manual GCash / Maya / bank / cash references</span></div>
+      <div class="table-wrap compact-table"><table><thead><tr><th>Shop</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead><tbody>
+        ${payments.map(p=>`<tr>
+          <td><strong>${esc(p.shop?.name||"Shop")}</strong><div class="help">${niceDate(p.created_at,true)}</div></td>
+          <td>${esc(String(p.method||"").replaceAll("_"," "))}</td>
+          <td>${esc(p.reference_number)}</td>
+          <td><strong>${peso(p.amount_php)}</strong></td>
+          <td>${pill(p.status)}</td>
+          <td>${p.status==="pending"?`<div class="actions"><button class="btn btn-success btn-sm verify-license-payment" data-id="${p.id}">Verify</button><button class="btn btn-danger btn-sm reject-license-payment" data-id="${p.id}">Reject</button></div>`:"—"}</td>
+        </tr>`).join("")||'<tr><td colspan="6">No payment submissions yet.</td></tr>'}
+      </tbody></table></div>
+    </div>
 
     <div class="card" style="margin-bottom:14px">
       <div class="card-title"><h3>Custom license orders</h3><span>Tailored modules, limits and pricing</span></div>
@@ -2599,23 +2618,38 @@ async function loadAdminClients() {
     </div>
 
     <div class="table-wrap"><table><thead><tr><th>Shop</th><th>Owner</th><th>Plan</th><th>License</th><th>Devices</th><th>Staff</th><th>Expires</th><th>Actions</th></tr></thead><tbody>
-      ${clients.map(c=>`
+      ${clients.map(client=>`
         <tr>
-          <td><strong>${esc(c.shop_name)}</strong><div class="help">${esc(String(c.shop_id).slice(0,8))}…</div></td>
-          <td>${esc(c.owner_email||"—")}</td>
-          <td>${c.plan_code?pill(c.plan_code):"—"}${c.billing_cycle?`<div class="help">${esc(c.billing_cycle)}${c.price_snapshot_php!=null?` · ${peso(c.price_snapshot_php)}`:""}</div>`:""}</td>
-          <td>${pill(c.license_status)}${c.license_key_last4?`<div class="help">••••${esc(c.license_key_last4)}</div>`:""}</td>
-          <td>${number(c.device_count)}/${c.max_devices??"—"}</td>
-          <td>${number(c.member_count)}/${c.max_staff??"—"}</td>
-          <td>${c.license_status === "trial" && c.expires_at ? `<strong>${esc(trialRemaining(c.expires_at)?.label || "Trial")}</strong><div class="help">${niceDate(c.expires_at)}</div>` : niceDate(c.expires_at)}</td>
+          <td><strong>${esc(client.shop_name)}</strong><div class="help">${esc(String(client.shop_id).slice(0,8))}…</div></td>
+          <td>${esc(client.owner_email||"—")}</td>
+          <td>${client.plan_code?pill(client.plan_code):"—"}${client.billing_cycle?`<div class="help">${esc(client.billing_cycle)}${client.price_snapshot_php!=null?` · ${peso(client.price_snapshot_php)}`:""}</div>`:""}</td>
+          <td>${pill(client.license_status)}${client.license_key_last4?`<div class="help">••••${esc(client.license_key_last4)}</div>`:""}</td>
+          <td>${number(client.device_count)}/${client.max_devices??"—"}</td>
+          <td>${number(client.member_count)}/${client.max_staff??"—"}</td>
+          <td>${client.license_status==="trial"&&client.expires_at?`<strong>${esc(trialRemaining(client.expires_at)?.label||"Trial")}</strong><div class="help">${niceDate(client.expires_at)}</div>`:niceDate(client.expires_at)}</td>
           <td><div class="actions">
-            <button class="btn btn-primary btn-sm issue-license" data-shop="${esc(c.shop_id)}" data-name="${esc(c.shop_name)}">Issue</button>
-            ${c.license_status!=="unlicensed" ? `<button class="btn ${c.license_status==="suspended"?"btn-success":"btn-danger"} btn-sm status-license" data-shop="${esc(c.shop_id)}" data-status="${c.license_status==="suspended"?"active":"suspended"}">${c.license_status==="suspended"?"Reactivate":"Suspend"}</button>` : ""}
-            <button class="btn btn-secondary btn-sm reset-devices" data-shop="${esc(c.shop_id)}">Reset devices</button>
+            <button class="btn btn-primary btn-sm issue-license" data-shop="${esc(client.shop_id)}" data-name="${esc(client.shop_name)}">Issue</button>
+            ${client.license_status!=="unlicensed"?`<button class="btn ${client.license_status==="suspended"?"btn-success":"btn-danger"} btn-sm status-license" data-shop="${esc(client.shop_id)}" data-status="${client.license_status==="suspended"?"active":"suspended"}">${client.license_status==="suspended"?"Reactivate":"Suspend"}</button>`:""}
+            <button class="btn btn-secondary btn-sm reset-devices" data-shop="${esc(client.shop_id)}">Reset devices</button>
           </div></td>
-        </tr>`).join("") || '<tr><td colspan="8">No client shops found.</td></tr>'}
+        </tr>`).join("")||'<tr><td colspan="8">No client shops found.</td></tr>'}
     </tbody></table></div>`;
 
+  async function setPaymentStatus(id,status){
+    const patch={
+      status,
+      verified_by:state.user.id,
+      verified_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()
+    };
+    const {error}=await supabase.from("license_payment_submissions").update(patch).eq("id",id);
+    if(error) return toast(friendlyError(error),"error");
+    toast(`Payment marked ${status}.`,"success");
+    await loadAdminClients();
+  }
+
+  root.querySelectorAll(".verify-license-payment").forEach(btn=>btn.addEventListener("click",()=>setPaymentStatus(btn.dataset.id,"verified")));
+  root.querySelectorAll(".reject-license-payment").forEach(btn=>btn.addEventListener("click",()=>setPaymentStatus(btn.dataset.id,"rejected")));
   root.querySelectorAll(".issue-license").forEach(btn=>btn.addEventListener("click",()=>openLicenseModal(btn.dataset.shop,btn.dataset.name)));
   root.querySelectorAll(".status-license").forEach(btn=>btn.addEventListener("click",()=>setLicenseStatus(btn.dataset.shop,btn.dataset.status)));
   root.querySelectorAll(".reset-devices").forEach(btn=>btn.addEventListener("click",()=>resetDevices(btn.dataset.shop)));
@@ -2628,6 +2662,7 @@ async function loadAdminClients() {
     btn.addEventListener("click",()=>openLicenseModal(order.shop_id,order.shop?.name||"Shop",order));
   });
 }
+
 
 function openCustomOrderReview(order){
   if(!order) return;
