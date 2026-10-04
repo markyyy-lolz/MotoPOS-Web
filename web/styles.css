@@ -568,3 +568,6 @@ table{width:100%;border-collapse:collapse;min-width:700px}th,td{text-align:left;
   .custom-order-row>div:last-child{text-align:left;align-items:flex-start}
   .chat-head-actions{width:100%;justify-content:flex-start}
 }
+
+.notification-row.unread{background:rgba(59,130,246,.045);border-radius:12px;padding-left:10px;padding-right:10px}
+.notification-row.unread>span>strong{color:#dbeafe}
