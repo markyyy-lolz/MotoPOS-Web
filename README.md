@@ -29,3 +29,15 @@ MotoPOS Cloud 1.1 moves pricing and plan entitlements into Supabase.
 - Monthly / annual / custom license terms
 - License price snapshots and event history
 - Administrator overrides for special device/staff contracts
+
+
+## MotoPOS v2.2 Production Hardening
+
+- Server-side entitlement gates for licensed modules
+- API-free MotoPOS Auto Support with human handoff
+- In-app shop notifications
+- Custom license orders with manual payment verification
+- Developer System Health Center
+- CSV exports and full JSON shop backup
+- Android Bluetooth + USB ESC/POS printing
+- Barcode scanning for POS and inventory product setup
