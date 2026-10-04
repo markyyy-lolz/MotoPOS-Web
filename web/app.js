@@ -1939,11 +1939,11 @@ async function pageSupport(root) {
   if(!state.supportThreadId || !list.some(t=>t.id===state.supportThreadId)) state.supportThreadId=list[0]?.id||null;
 
   root.innerHTML=`
-    ${head("Support Chat","MotoPOS AI can answer common questions instantly, with human handoff when needed",'<button id="new-support" class="btn btn-primary">New conversation</button>')}
-    <div class="ai-support-note"><strong>MotoPOS AI Assistant</strong><span>Automatic first response for normal troubleshooting. Billing, custom licensing, account/security and developer issues are handed to human support.</span></div>
+    ${head("Support Chat","MotoPOS Auto Support guides common fixes instantly, with human handoff when needed",'<button id="new-support" class="btn btn-primary">New conversation</button>')}
+    <div class="ai-support-note"><strong>MotoPOS Auto Support</strong><span>API-free guided troubleshooting for common MotoPOS problems. Billing, custom licensing, account/security and developer issues are handed to human support.</span></div>
     <div class="chat-layout">
       <div class="chat-list">
-        ${list.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.subject)}</strong><span>${esc(t.status)} · ${t.ai_handoff?"human handoff":t.ai_enabled?"AI active":"AI paused"} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No conversations</strong>Start a support chat whenever you need help.</div>'}
+        ${list.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.subject)}</strong><span>${esc(t.status)} · ${t.ai_handoff?"human handoff":t.ai_enabled?"Auto Support active":"Auto Support paused"} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No conversations</strong>Start a support chat whenever you need help.</div>'}
       </div>
       <div id="support-chat-panel" class="chat-panel"></div>
     </div>`;
@@ -1956,16 +1956,13 @@ async function pageSupport(root) {
   await renderSupportChatPanel(document.querySelector("#support-chat-panel"),state.supportThreadId,false);
 }
 
-async function invokeAiSupport(threadId) {
-  const {data,error}=await supabase.functions.invoke("support-ai-reply",{body:{thread_id:threadId}});
+async function invokeAutoSupport(threadId) {
+  const {data,error}=await supabase.functions.invoke("support-auto-reply",{body:{thread_id:threadId}});
   if(error){
     const details=await functionErrorDetails(error);
     const message=String(details?.message||details?.error||error?.message||"");
-    if(message.includes("OPENAI_API_KEY") || details?.configured===false){
-      toast("Message sent. AI assistant is not configured yet; human support can still reply.","");
-      return {configured:false};
-    }
-    console.warn("MotoPOS AI Support:",message);
+    console.warn("MotoPOS Auto Support:",message);
+    toast("Message sent. Auto Support could not answer this time; human support can still reply.","");
     return null;
   }
   return data||null;
@@ -1974,7 +1971,7 @@ async function invokeAiSupport(threadId) {
 function openNewSupportThread(root) {
   showModal(`
     <h2>New support conversation</h2>
-    <p>MotoPOS AI will try to answer common product questions first. Sensitive or account-level requests are automatically handed to human support.</p>
+    <p>MotoPOS Auto Support will try guided troubleshooting first. Sensitive or account-level requests are automatically handed to human support.</p>
     <form id="new-support-form" class="form">
       <div class="field"><label>Subject</label><input class="input" name="subject" minlength="3" maxlength="160" required placeholder="Example: Printer not connecting"></div>
       <div class="field"><label>Priority</label><select class="input" name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option><option value="low">Low</option></select></div>
@@ -2006,8 +2003,8 @@ function openNewSupportThread(root) {
     state.supportThreadId=thread.id;
     closeModal();
     toast("Support conversation started.","success");
-    const ai=await invokeAiSupport(thread.id);
-    if(ai?.handoff) toast("MotoPOS AI handed this conversation to human support.","");
+    const ai=await invokeAutoSupport(thread.id);
+    if(ai?.handoff) toast("MotoPOS Auto Support handed this conversation to human support.","");
     await pageSupport(root);
   });
 }
@@ -2031,21 +2028,21 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
   if(messageRes.error){panel.innerHTML=`<div class="empty"><strong>Unable to load messages</strong>${esc(friendlyError(messageRes.error))}</div>`;return;}
   const t=threadRes.data;
   const messages=messageRes.data||[];
-  const aiState=t.ai_handoff?"Human handoff":t.ai_enabled?"AI active":"AI paused";
+  const aiState=t.ai_handoff?"Human handoff":t.ai_enabled?"Auto Support active":"Auto Support paused";
 
   panel.innerHTML=`
     <div class="chat-head">
       <div><strong>${esc(t.subject)}</strong><div class="help">${adminMode?esc(t.shop?.name||"Shop")+" · ":""}${esc(t.priority)} priority · ${esc(t.status)} · ${esc(aiState)}</div></div>
       <div class="chat-head-actions">
-        ${adminMode?`<button id="support-ai-toggle" class="btn btn-secondary btn-sm">${t.ai_enabled&&!t.ai_handoff?"Pause AI":"Resume AI"}</button><select id="support-status" class="input" style="width:auto;height:38px"><option value="open" ${t.status==="open"?"selected":""}>Open</option><option value="pending" ${t.status==="pending"?"selected":""}>Pending</option><option value="closed" ${t.status==="closed"?"selected":""}>Closed</option></select>`:pill(t.ai_handoff?"human handoff":t.status)}
+        ${adminMode?`<button id="support-ai-toggle" class="btn btn-secondary btn-sm">${t.ai_enabled&&!t.ai_handoff?"Pause Auto Support":"Resume Auto Support"}</button><select id="support-status" class="input" style="width:auto;height:38px"><option value="open" ${t.status==="open"?"selected":""}>Open</option><option value="pending" ${t.status==="pending"?"selected":""}>Pending</option><option value="closed" ${t.status==="closed"?"selected":""}>Closed</option></select>`:pill(t.ai_handoff?"human handoff":t.status)}
       </div>
     </div>
     <div class="chat-messages" id="support-message-list">
       ${messages.map(m=>{
         const isAi=m.sender_type==="ai";
         const mine=adminMode?m.sender_type==="support":m.sender_type==="customer";
-        const label=isAi?"MotoPOS AI":m.sender_type==="support"?"MotoPOS Support":adminMode?"Customer":"You";
-        return `<div class="chat-bubble ${mine?"support":isAi?"ai":""}"><p>${esc(m.body)}</p><small>${esc(label)}${isAi&&m.ai_model?` · ${esc(m.ai_model)}`:""} · ${niceDate(m.created_at,true)}</small></div>`;
+        const label=isAi?"MotoPOS Auto Support":m.sender_type==="support"?"MotoPOS Support":adminMode?"Customer":"You";
+        return `<div class="chat-bubble ${mine?"support":isAi?"ai":""}"><p>${esc(m.body)}</p><small>${esc(label)} · ${niceDate(m.created_at,true)}</small></div>`;
       }).join("")||'<div class="empty"><strong>No messages yet</strong>Send the first message below.</div>'}
     </div>
     <form id="support-compose" class="chat-compose">
@@ -2069,7 +2066,7 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
       : {ai_enabled:false,updated_at:new Date().toISOString()};
     const {error}=await supabase.from("support_threads").update(patch).eq("id",threadId);
     if(error) return toast(friendlyError(error),"error");
-    toast(resume?"AI auto-reply resumed.":"AI auto-reply paused.","success");
+    toast(resume?"Auto Support resumed.":"Auto Support paused.","success");
     await renderSupportChatPanel(panel,threadId,adminMode);
   });
 
@@ -2091,8 +2088,8 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
     if(adminMode){
       await supabase.from("support_threads").update({ai_handoff:true,updated_at:new Date().toISOString()}).eq("id",threadId);
     }else if(t.ai_enabled&&!t.ai_handoff){
-      const ai=await invokeAiSupport(threadId);
-      if(ai?.handoff) toast("MotoPOS AI handed this conversation to human support.","");
+      const ai=await invokeAutoSupport(threadId);
+      if(ai?.handoff) toast("MotoPOS Auto Support handed this conversation to human support.","");
     }
     await renderSupportChatPanel(panel,threadId,adminMode);
   });
@@ -2607,7 +2604,7 @@ async function loadAdminSupport() {
       <article class="metric"><div class="metric-label">Closed</div><div class="metric-value">${number(threads.filter(t=>t.status==="closed").length)}</div><div class="metric-sub">Resolved conversations</div></article>
     </section>
     <div class="chat-layout">
-      <div class="chat-list">${threads.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.shop?.name||"Shop")} · ${esc(t.subject)}</strong><span>${esc(t.priority)} · ${esc(t.status)} · ${t.ai_handoff?"human":t.ai_enabled?"AI":"manual"} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No support requests</strong>Client chats will appear here.</div>'}</div>
+      <div class="chat-list">${threads.map(t=>`<button class="chat-thread ${t.id===state.supportThreadId?"active":""}" data-thread="${t.id}"><strong>${esc(t.shop?.name||"Shop")} · ${esc(t.subject)}</strong><span>${esc(t.priority)} · ${esc(t.status)} · ${t.ai_handoff?"human":t.ai_enabled?"auto":"manual"} · ${niceDate(t.last_message_at,true)}</span></button>`).join("")||'<div class="empty"><strong>No support requests</strong>Client chats will appear here.</div>'}</div>
       <div id="admin-support-panel" class="chat-panel"></div>
     </div>`;
   root.querySelectorAll(".chat-thread").forEach(btn=>btn.addEventListener("click",async()=>{
