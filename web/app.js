@@ -626,6 +626,7 @@ function renderManual() {
       <nav class="public-nav">
         <a href="#/" class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></a>
         <div class="nav-actions">
+          <a class="btn btn-secondary" href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Resources</a>
           <a class="btn btn-secondary" href="#/">Website</a>
           ${state.session && state.shop ? '<a class="btn btn-primary" href="#/dashboard/overview">Dashboard</a>' : '<a class="btn btn-primary" href="#/login">Sign in</a>'}
         </div>
@@ -635,6 +636,9 @@ function renderManual() {
         <span class="eyebrow">MotoPOS Help Center</span>
         <h1>App Manual & User Guide</h1>
         <p>Step-by-step instructions for owners, cashiers, inventory staff, mechanics, managers and MotoPOS administrators.</p>
+        <div class="hero-actions" style="margin-top:14px">
+          <a class="btn btn-secondary" href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Open MotoPOS Resources</a>
+        </div>
         <div class="manual-search-wrap">
           <input id="manual-search" class="input manual-search" type="search" placeholder="Search manual — e.g. checkout, inventory, trial, staff…" autocomplete="off">
         </div>
@@ -672,7 +676,7 @@ function renderManual() {
 
       <footer class="footer">
         <span>© 2026 MotoPOS Cloud · App Manual</span>
-        <span><a href="#/manual">Help Center</a> · <a href="#/">MotoPOS Website</a></span>
+        <span><a href="#/manual">Help Center</a> · <a href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Resources</a> · <a href="#/">MotoPOS Website</a></span>
       </footer>
     </div>`;
 
@@ -707,6 +711,7 @@ function renderLanding() {
       <nav class="public-nav">
         <a href="#/" class="brand"><span class="brand-logo">M</span><span>MotoPOS</span></a>
         <div class="nav-actions">
+          <a class="btn btn-secondary" href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Resources</a>
           <a class="btn btn-secondary" href="#/manual">App Manual</a>
           <a class="btn btn-secondary" href="#/login">Sign in</a>
           <a class="btn btn-primary" href="#/login?mode=signup">Start free setup</a>
@@ -723,6 +728,7 @@ function renderLanding() {
               <a class="btn btn-primary" href="#/login?mode=signup">Start 7-day Pro trial</a>
               <a class="btn btn-secondary" href="#/login">Open dashboard</a>
               <a class="btn btn-secondary" href="#/manual">Read the app manual</a>
+              <a class="btn btn-secondary" href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Open Resources</a>
             </div>
             <div class="hero-trust">
               <span><b>Supabase</b> secured data</span>
@@ -777,6 +783,26 @@ function renderLanding() {
           </div>
         </section>
 
+        <section class="section">
+          <div class="section-head">
+            <div><span class="kicker">MotoPOS resources</span><h2>Official shared files.</h2></div>
+            <p>Open the official MotoPOS Google Drive folder for shared resources and files.</p>
+          </div>
+          <div class="founder-card reveal-motion is-visible">
+            <div class="founder-mark">G</div>
+            <div class="founder-copy">
+              <span class="kicker">Google Drive</span>
+              <h2>MotoPOS Resources</h2>
+              <p>Use this official shared folder to access MotoPOS files provided through Google Drive.</p>
+              <div class="founder-actions">
+                <a class="btn btn-primary" href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Open Google Drive Folder</a>
+                <a class="btn btn-secondary" href="#/manual">Read the MotoPOS manual</a>
+                <a class="btn btn-secondary" href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">MotoPOS Resources</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="section founder-section">
           <div class="founder-card reveal-motion is-visible">
             <div class="founder-mark">MR</div>
@@ -794,7 +820,7 @@ function renderLanding() {
         </section>
       </main>
 
-      <footer class="footer"><span>© 2026 MotoPOS Cloud · Built by Mark Reymuel Pascual</span><span><a href="#/manual">App Manual</a> · <a href="https://facebook.com/profile.php?id=61590474910314" target="_blank" rel="noopener noreferrer">Facebook Contact</a> · Motorcycle parts • Service • POS • Licensing</span></footer>
+      <footer class="footer"><span>© 2026 MotoPOS Cloud · Built by Mark Reymuel Pascual</span><span><a href="#/manual">App Manual</a> · <a href="https://drive.google.com/drive/folders/1J5UbNURjlXY2DfTb5Ed9pudc765dPZdB?usp=sharing" target="_blank" rel="noopener noreferrer">Resources</a> · <a href="https://facebook.com/profile.php?id=61590474910314" target="_blank" rel="noopener noreferrer">Facebook Contact</a> · Motorcycle parts • Service • POS • Licensing</span></footer>
     </div>`;
 
   setupMotion();
