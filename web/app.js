@@ -1119,6 +1119,7 @@ function head(title, subtitle, action = "") {
   return `<div class="page-head"><div><h1>${esc(title)}</h1><p>${esc(subtitle)}</p></div>${action}</div>`;
 }
 
+
 async function pageOverview(root) {
   const shopId = state.shop.id;
   const canFinance = ["owner","admin","manager"].includes(state.membership.role);
@@ -1133,10 +1134,19 @@ async function pageOverview(root) {
   const [salesRes, productRes, jobRes, expenseRes] = await Promise.all(queries);
   for (const r of [salesRes,productRes,jobRes,expenseRes].filter(Boolean)) if (r.error) throw r.error;
 
+  const notificationRes = await supabase.from("notifications")
+    .select("id,kind,title,body,action_url,is_read,created_at")
+    .eq("shop_id",shopId)
+    .order("created_at",{ascending:false})
+    .limit(8);
+  if (notificationRes.error) throw notificationRes.error;
+
   const sales = salesRes.data || [];
   const products = productRes.data || [];
   const jobs = jobRes.data || [];
   const expenses = expenseRes?.data || [];
+  const notifications = notificationRes.data || [];
+  const unreadNotifications = notifications.filter(n=>!n.is_read);
 
   const now = new Date();
   const sameDay = value => {
@@ -1170,8 +1180,25 @@ async function pageOverview(root) {
           ${activeJobs.slice(0,6).map(j=>`<div class="stat-row"><span>${esc(j.job_number || "Job")} · ${esc(j.complaint || "Service job")}</span><strong>${pill(j.status)}</strong></div>`).join("") || '<div class="empty"><strong>No active jobs</strong>New service jobs will appear here.</div>'}
         </div>
       </div>
-    </section>`;
+    </section>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title"><h3>Notifications</h3><span>${unreadNotifications.length} unread</span></div>
+      <div class="stat-list">
+        ${notifications.length ? notifications.map(n=>`
+          <div class="stat-row notification-row ${n.is_read?"":"unread"}">
+            <span><strong>${esc(n.title)}</strong><small>${esc(n.body)} · ${niceDate(n.created_at,true)}</small></span>
+            <button class="btn btn-secondary btn-sm mark-notification" data-id="${n.id}" ${n.is_read?"disabled":""}>${n.is_read?"Read":"Mark read"}</button>
+          </div>`).join("") : '<div class="help">No notifications yet.</div>'}
+      </div>
+    </div>`;
+
+  root.querySelectorAll(".mark-notification").forEach(btn=>btn.addEventListener("click",async()=>{
+    const {error}=await supabase.from("notifications").update({is_read:true}).eq("id",btn.dataset.id);
+    if(error) return toast(friendlyError(error),"error");
+    await pageOverview(root);
+  }));
 }
+
 
 async function pageSales(root) {
   const { data, error } = await supabase.from("sales")
