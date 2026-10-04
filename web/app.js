@@ -2424,6 +2424,7 @@ async function pageSettings(root) {
 }
 
 
+
 async function renderAdmin() {
   if (!state.isSystemAdmin) {
     app.innerHTML = `<div class="setup"><div class="setup-card"><h1>Access denied</h1><p>This area is restricted to MotoPOS system administrators.</p><a class="btn btn-secondary" href="#/dashboard/overview">Return to dashboard</a></div></div>`;
@@ -2431,7 +2432,7 @@ async function renderAdmin() {
   }
 
   const path=currentPath();
-  const section=path==="admin/users"?"users":path==="admin/support"?"support":"clients";
+  const section=path==="admin/users"?"users":path==="admin/support"?"support":path==="admin/health"?"health":"clients";
 
   app.innerHTML = `
     <div class="app-shell">
@@ -2442,13 +2443,14 @@ async function renderAdmin() {
           <a class="nav-item ${section==="clients"?"active":""}" href="#/admin"><span>Clients & Licenses</span><span class="nav-badge">ADMIN</span></a>
           <a class="nav-item ${section==="users"?"active":""}" href="#/admin/users"><span>Users & Emails</span></a>
           <a class="nav-item ${section==="support"?"active":""}" href="#/admin/support"><span>Support Inbox</span></a>
+          <a class="nav-item ${section==="health"?"active":""}" href="#/admin/health"><span>System Health</span><span class="nav-badge">LIVE</span></a>
           <a class="nav-item" href="#/manual"><span>App Manual</span><span class="nav-badge">HELP</span></a>
           ${state.shop ? '<a class="nav-item" href="#/dashboard/overview"><span>My Shop</span></a>' : ""}
         </nav>
         <div class="sidebar-bottom"><button id="admin-sign-out" class="btn btn-secondary" style="width:100%">Sign out</button></div>
       </aside>
       <div class="main">
-        <header class="topbar"><div class="topbar-title"><strong>MotoPOS Control Center</strong><span>Users, licenses, support and clients</span></div><div class="user-pill"><div class="avatar">A</div><div class="user-copy"><strong style="font-size:12px">${esc(state.user?.email||"")}</strong><div class="help">system admin</div></div></div></header>
+        <header class="topbar"><div class="topbar-title"><strong>MotoPOS Control Center</strong><span>Users, licenses, support, health and clients</span></div><div class="user-pill"><div class="avatar">A</div><div class="user-copy"><strong style="font-size:12px">${esc(state.user?.email||"")}</strong><div class="help">system admin</div></div></div></header>
         <main id="admin-content" class="content"><div class="loading-block"></div></main>
       </div>
     </div>`;
@@ -2459,7 +2461,60 @@ async function renderAdmin() {
 
   if(section==="users") await loadAdminUsers();
   else if(section==="support") await loadAdminSupport();
+  else if(section==="health") await loadAdminHealth();
   else await loadAdminClients();
+}
+
+async function loadAdminHealth(){
+  const root=document.querySelector("#admin-content");
+  if(!root) return;
+  const {data,error}=await supabase.rpc("admin_system_health_v1");
+  if(error){
+    root.innerHTML=`<div class="empty"><strong>Unable to load system health</strong>${esc(friendlyError(error))}</div>`;
+    return;
+  }
+  const h=data||{};
+  const latest=h.latest_app_version||{};
+  root.innerHTML=`
+    ${head("System Health","Live MotoPOS production indicators from the backend")}
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Users</div><div class="metric-value">${number(h.users||0)}</div><div class="metric-sub">Auth accounts</div></article>
+      <article class="metric"><div class="metric-label">Shops</div><div class="metric-value">${number(h.shops||0)}</div><div class="metric-sub">Client workspaces</div></article>
+      <article class="metric"><div class="metric-label">Active licenses</div><div class="metric-value">${number(h.active_licenses||0)}</div><div class="metric-sub">${number(h.expired_licenses||0)} expired</div></article>
+      <article class="metric"><div class="metric-label">Active devices</div><div class="metric-value">${number(h.active_devices||0)}</div><div class="metric-sub">Registered terminals</div></article>
+    </section>
+    <section class="grid-2">
+      <div class="card">
+        <div class="card-title"><h3>Attention queue</h3><span>Operational follow-up</span></div>
+        <div class="stat-list">
+          <div class="stat-row"><span>Open support threads</span><strong>${number(h.open_support||0)}</strong></div>
+          <div class="stat-row"><span>Human handoffs</span><strong>${number(h.human_handoffs||0)}</strong></div>
+          <div class="stat-row"><span>Custom license orders</span><strong>${number(h.pending_custom_orders||0)}</strong></div>
+          <div class="stat-row"><span>Pending payments</span><strong>${number(h.pending_payments||0)}</strong></div>
+          <div class="stat-row"><span>Offline sync queue</span><strong>${number(h.offline_queue||0)}</strong></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><h3>Data footprint</h3><span>Current production records</span></div>
+        <div class="stat-list">
+          <div class="stat-row"><span>Products</span><strong>${number(h.products||0)}</strong></div>
+          <div class="stat-row"><span>Customers</span><strong>${number(h.customers||0)}</strong></div>
+          <div class="stat-row"><span>Sales</span><strong>${number(h.sales||0)}</strong></div>
+          <div class="stat-row"><span>Latest Android version</span><strong>${esc(latest.name||"—")} ${latest.code?"("+latest.code+")":""}</strong></div>
+          <div class="stat-row"><span>Generated</span><strong>${niceDate(h.generated_at,true)}</strong></div>
+        </div>
+      </div>
+    </section>
+    <div class="card" style="margin-top:14px">
+      <div class="card-title"><h3>v2.2 production checks</h3><span>Backend</span></div>
+      <div class="entitlement-grid">
+        <span class="entitlement-chip">✓ Server-side plan gates</span>
+        <span class="entitlement-chip">✓ Notification pipeline</span>
+        <span class="entitlement-chip">✓ MotoPOS Auto Support</span>
+        <span class="entitlement-chip">✓ Manual license payments</span>
+      </div>
+      <div class="help" style="margin-top:12px">Use Supabase Security and Performance Advisors for platform-level findings and database tuning.</div>
+    </div>`;
 }
 
 
