@@ -239,6 +239,7 @@ function friendlyError(error) {
   if (lower.includes("email not confirmed")) return "Verify your email first, then sign in.";
   if (lower.includes("over_email_send_rate_limit") || lower.includes("email rate limit exceeded")) return "Verification email limit reached. Please try again later. For production sign-ups, MotoPOS needs a custom SMTP email provider.";
   if (lower.includes("unexpected status code returned from hook: 405")) return "Account creation is temporarily unavailable because the email hook is misconfigured. Please contact MotoPOS Support.";
+  if (lower.includes("plan does not include")) return raw.split("\n")[0].slice(0,220);
   if (lower.includes("row-level security") || lower.includes("permission denied")) return "Your account does not have permission for that action.";
   if (lower.includes("email address not authorized")) return "This email cannot receive MotoPOS verification mail from the current Supabase mail provider. Configure custom SMTP for public sign-ups.";
   if (lower.includes("rate limit") || lower.includes("too many requests")) return "Email sending is temporarily rate-limited. Wait before requesting another verification email.";
@@ -1122,21 +1123,28 @@ function head(title, subtitle, action = "") {
 async function pageOverview(root) {
   const shopId = state.shop.id;
   const canFinance = ["owner","admin","manager"].includes(state.membership.role);
+  const features = entitlementFeatures();
+  const hasService = features.includes("service_jobs");
+  const hasOperations = features.includes("operations");
 
-  const queries = [
+  const [salesRes, productRes, jobRes, expenseRes, alertRes] = await Promise.all([
     supabase.from("sales").select("id,total_amount,status,created_at,sale_number").eq("shop_id", shopId).order("created_at",{ascending:false}).limit(100),
     supabase.from("products").select("id,name,sku,stock_quantity,reorder_level,selling_price").eq("shop_id",shopId).eq("is_active",true),
-    supabase.from("job_orders").select("id,job_number,status,complaint,created_at").eq("shop_id",shopId).order("created_at",{ascending:false}).limit(30)
-  ];
-  if (canFinance) queries.push(supabase.from("expenses").select("id,amount,expense_date").eq("shop_id",shopId).order("expense_date",{ascending:false}).limit(100));
-
-  const [salesRes, productRes, jobRes, expenseRes] = await Promise.all(queries);
-  for (const r of [salesRes,productRes,jobRes,expenseRes].filter(Boolean)) if (r.error) throw r.error;
+    hasService
+      ? supabase.from("job_orders").select("id,job_number,status,complaint,created_at").eq("shop_id",shopId).order("created_at",{ascending:false}).limit(30)
+      : Promise.resolve({data:[],error:null}),
+    canFinance && hasOperations
+      ? supabase.from("expenses").select("id,amount,expense_date").eq("shop_id",shopId).order("expense_date",{ascending:false}).limit(100)
+      : Promise.resolve({data:[],error:null}),
+    supabase.rpc("get_shop_alerts",{p_shop_id:shopId})
+  ]);
+  for (const r of [salesRes,productRes,jobRes,expenseRes,alertRes]) if (r?.error) throw r.error;
 
   const sales = salesRes.data || [];
   const products = productRes.data || [];
   const jobs = jobRes.data || [];
-  const expenses = expenseRes?.data || [];
+  const expenses = expenseRes.data || [];
+  const alerts = alertRes.data || [];
 
   const now = new Date();
   const sameDay = value => {
@@ -1151,11 +1159,22 @@ async function pageOverview(root) {
 
   root.innerHTML = `
     ${head("Overview","Live snapshot of your motorcycle shop")}
+    ${alerts.length ? `
+      <section class="alert-center">
+        <div class="card-title"><h3>Needs attention</h3><span>${alerts.length} current alert(s)</span></div>
+        <div class="alert-grid">
+          ${alerts.slice(0,8).map(a=>`
+            <a class="alert-item ${esc(a.severity||"info")}" href="#/dashboard/${esc(a.action_page||"overview")}">
+              <div><strong>${esc(a.title)}</strong><span>${esc(a.message)}</span></div>
+              <small>${niceDate(a.created_at,true)}</small>
+            </a>`).join("")}
+        </div>
+      </section>` : ""}
     <section class="metrics">
       <article class="metric"><div class="metric-label">Sales today</div><div class="metric-value">${money(todayRevenue)}</div><div class="metric-sub">${todaySales.length} completed transaction(s)</div></article>
-      <article class="metric"><div class="metric-label">Active jobs</div><div class="metric-value">${number(activeJobs.length)}</div><div class="metric-sub">Workshop queue</div></article>
+      <article class="metric"><div class="metric-label">${hasService?"Active jobs":"Products"}</div><div class="metric-value">${number(hasService?activeJobs.length:products.length)}</div><div class="metric-sub">${hasService?"Workshop queue":"Active inventory items"}</div></article>
       <article class="metric"><div class="metric-label">Low stock</div><div class="metric-value">${number(lowStock.length)}</div><div class="metric-sub">At or below reorder level</div></article>
-      <article class="metric"><div class="metric-label">${canFinance ? "Net today" : "Products"}</div><div class="metric-value">${canFinance ? money(todayRevenue-todayExpense) : number(products.length)}</div><div class="metric-sub">${canFinance ? `Expenses ${money(todayExpense)}` : "Active inventory items"}</div></article>
+      <article class="metric"><div class="metric-label">${canFinance&&hasOperations ? "Net today" : "Plan"}</div><div class="metric-value">${canFinance&&hasOperations ? money(todayRevenue-todayExpense) : esc(state.entitlements?.plan_name||"MotoPOS")}</div><div class="metric-sub">${canFinance&&hasOperations ? `Expenses ${money(todayExpense)}` : "Server-enforced entitlements"}</div></article>
     </section>
     <section class="grid-2">
       <div class="card">
@@ -1165,9 +1184,11 @@ async function pageOverview(root) {
         </div>
       </div>
       <div class="card">
-        <div class="card-title"><h3>Workshop queue</h3><a href="#/dashboard/service">Open service</a></div>
+        <div class="card-title"><h3>${hasService?"Workshop queue":"Inventory attention"}</h3><a href="#/dashboard/${hasService?"service":"inventory"}">${hasService?"Open service":"Open inventory"}</a></div>
         <div class="stat-list">
-          ${activeJobs.slice(0,6).map(j=>`<div class="stat-row"><span>${esc(j.job_number || "Job")} · ${esc(j.complaint || "Service job")}</span><strong>${pill(j.status)}</strong></div>`).join("") || '<div class="empty"><strong>No active jobs</strong>New service jobs will appear here.</div>'}
+          ${hasService
+            ? (activeJobs.slice(0,6).map(j=>`<div class="stat-row"><span>${esc(j.job_number || "Job")} · ${esc(j.complaint || "Service job")}</span><strong>${pill(j.status)}</strong></div>`).join("") || '<div class="empty"><strong>No active jobs</strong>New service jobs will appear here.</div>')
+            : (lowStock.slice(0,6).map(p=>`<div class="stat-row"><span>${esc(p.name)} · ${esc(p.sku)}</span><strong>${number(p.stock_quantity)}</strong></div>`).join("") || '<div class="empty"><strong>Stock looks good</strong>No products are below reorder level.</div>')}
         </div>
       </div>
     </section>`;
@@ -2105,7 +2126,7 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
 
 async function pageLicense(root) {
   const canManageLicense = ["owner","admin","manager"].includes(state.membership?.role);
-  const [licenseRes, deviceRes, memberRes, historyRes, ordersRes] = await Promise.all([
+  const [licenseRes, deviceRes, memberRes, historyRes, ordersRes, paymentsRes] = await Promise.all([
     supabase.from("shop_licenses")
       .select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days,billing_cycle,price_snapshot_php,feature_overrides,custom_label")
       .eq("shop_id",state.shop.id).maybeSingle(),
@@ -2122,12 +2143,14 @@ async function pageLicense(root) {
       ? supabase.from("license_order_requests")
           .select("id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,updated_at")
           .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
+      : Promise.resolve({data:[],error:null}),
+    canManageLicense
+      ? supabase.from("license_payment_submissions")
+          .select("id,order_request_id,amount_php,payment_method,reference_number,status,notes,admin_notes,created_at,updated_at")
+          .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
       : Promise.resolve({data:[],error:null})
   ]);
-  if (licenseRes.error) throw licenseRes.error;
-  if (deviceRes.error) throw deviceRes.error;
-  if (historyRes.error) throw historyRes.error;
-  if (ordersRes.error) throw ordersRes.error;
+  for(const r of [licenseRes,deviceRes,memberRes,historyRes,ordersRes,paymentsRes]) if(r?.error) throw r.error;
 
   const license = licenseRes.data;
   const ent = state.entitlements || {};
@@ -2135,6 +2158,7 @@ async function pageLicense(root) {
   const staffCount = memberRes.data?.length || 0;
   const history = historyRes.data || [];
   const orders = ordersRes.data || [];
+  const payments = paymentsRes.data || [];
   const features = entitlementFeatures();
   const trial = license?.status === "trial" ? trialRemaining(license.expires_at) : null;
   const effectiveStatus = ent.status || (
@@ -2148,7 +2172,7 @@ async function pageLicense(root) {
     : `${cycleLabel}${license?.price_snapshot_php != null ? ` · ${peso(license.price_snapshot_php)}` : ""}`;
 
   root.innerHTML = `
-    ${head("License","MotoPOS plan, entitlements, limits and custom-order requests",canManageLicense?'<button id="request-custom-license" class="btn btn-primary">Request custom plan</button>':"")}
+    ${head("License","MotoPOS plan, entitlements, billing and custom-order requests",canManageLicense?'<div class="actions"><button id="submit-license-payment" class="btn btn-secondary">Submit payment</button><button id="request-custom-license" class="btn btn-primary">Request custom plan</button></div>':"")}
     ${license ? `
       ${license.status === "trial" ? `
         <div class="card" style="margin-bottom:14px;border-color:rgba(59,130,246,.28)">
@@ -2161,31 +2185,16 @@ async function pageLicense(root) {
         </div>
       ` : ""}
       <section class="metrics">
-        <article class="metric">
-          <div class="metric-label">Plan</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.custom_label || license.plan_code || "—")}</div>
-          <div class="metric-sub">${esc(billing)}</div>
-        </article>
-        <article class="metric">
-          <div class="metric-label">Status</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus || "unknown")}</div>
-          <div class="metric-sub">${license.expires_at ? `Expires · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
-        </article>
+        <article class="metric"><div class="metric-label">Plan</div><div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.custom_label || license.plan_code || "—")}</div><div class="metric-sub">${esc(billing)}</div></article>
+        <article class="metric"><div class="metric-label">Status</div><div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus || "unknown")}</div><div class="metric-sub">${license.expires_at ? `Expires · ${niceDate(license.expires_at)}` : "No expiration set"}</div></article>
         <article class="metric"><div class="metric-label">Devices</div><div class="metric-value">${devices.length}/${license.max_devices}</div><div class="metric-sub">Active registered devices</div></article>
         <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.offline_grace_days}-day offline grace</div></article>
       </section>
-
       <div class="card">
         <div class="card-title"><h3>Included in your plan</h3><span class="pill blue">${features.length} entitlements</span></div>
-        <div class="entitlement-grid">
-          ${features.length
-            ? features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("")
-            : '<span class="help">Licensed modules are unavailable until the plan is active.</span>'}
-        </div>
+        <div class="entitlement-grid">${features.length ? features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("") : '<span class="help">Licensed modules are unavailable until the plan is active.</span>'}</div>
       </div>
-    ` : `
-      <div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>
-    `}
+    ` : `<div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>`}
 
     ${canManageLicense ? `
       <div class="card custom-license-card" style="margin-top:14px">
@@ -2195,8 +2204,18 @@ async function pageLicense(root) {
             <div class="custom-order-row">
               <div><strong>${esc(order.requested_plan)} · ${esc(order.billing_cycle)}</strong><span>${number(order.desired_devices)} devices · ${number(order.desired_staff)} staff · ${Array.isArray(order.desired_features)?order.desired_features.length:0} modules</span></div>
               <div><strong>${order.quoted_price_php!=null?peso(order.quoted_price_php):order.budget_php!=null?`Budget ${peso(order.budget_php)}`:"Awaiting quote"}</strong><span>${pill(order.status)} · ${niceDate(order.created_at,true)}</span></div>
-            </div>
-          `).join(""):'<div class="help">No custom orders yet. Request a tailored combination of modules, devices, staff limits and billing term.</div>'}
+            </div>`).join("") : '<div class="help">No custom orders yet.</div>'}
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="card-title"><div><h3>Payment & renewal submissions</h3><span>Manual GCash, Maya, bank, cash or other payment references.</span></div><button id="submit-license-payment-card" class="btn btn-secondary btn-sm">Submit payment</button></div>
+        <div class="custom-order-list">
+          ${payments.length ? payments.map(p=>`
+            <div class="custom-order-row">
+              <div><strong>${peso(p.amount_php)} · ${esc(p.payment_method.toUpperCase())}</strong><span>Ref: ${esc(p.reference_number)} · ${niceDate(p.created_at,true)}</span></div>
+              <div><strong>${pill(p.status)}</strong><span>${esc(p.admin_notes||p.notes||"Awaiting review")}</span></div>
+            </div>`).join("") : '<div class="help">No payment references submitted yet.</div>'}
         </div>
       </div>
 
@@ -2204,13 +2223,7 @@ async function pageLicense(root) {
         <div class="card-title"><h3>License history</h3><span class="help">Latest ${history.length} event(s)</span></div>
         <div class="stat-list">
           ${history.length ? history.map(event => `
-            <div class="stat-row">
-              <span>
-                <strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong>
-                <small>${niceDate(event.created_at,true)}</small>
-              </span>
-              <strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong>
-            </div>
+            <div class="stat-row"><span><strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong><small>${niceDate(event.created_at,true)}</small></span><strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong></div>
           `).join("") : '<div class="help">No paid license events yet.</div>'}
         </div>
       </div>
@@ -2218,8 +2231,48 @@ async function pageLicense(root) {
   `;
 
   const openRequest=()=>openCustomLicenseRequest(root);
+  const openPayment=()=>openLicensePaymentSubmission(root,orders,license);
   document.querySelector("#request-custom-license")?.addEventListener("click",openRequest);
   document.querySelector("#request-custom-license-card")?.addEventListener("click",openRequest);
+  document.querySelector("#submit-license-payment")?.addEventListener("click",openPayment);
+  document.querySelector("#submit-license-payment-card")?.addEventListener("click",openPayment);
+}
+
+function openLicensePaymentSubmission(root, orders, license) {
+  const payableOrders=(orders||[]).filter(o=>["quoted","approved","reviewing","pending"].includes(o.status));
+  const defaultAmount=payableOrders.find(o=>o.quoted_price_php!=null)?.quoted_price_php ?? license?.price_snapshot_php ?? "";
+  showModal(`
+    <h2>Submit license payment</h2>
+    <p>Submit the payment reference for manual MotoPOS verification. Never send PINs, OTPs or passwords.</p>
+    <form id="license-payment-form" class="form">
+      <div class="field"><label>Related custom order (optional)</label><select class="input" name="order_id"><option value="">Renewal / fixed plan</option>${payableOrders.map(o=>`<option value="${esc(o.id)}">${esc(o.requested_plan)} · ${esc(o.billing_cycle)} · ${esc(o.status)}${o.quoted_price_php!=null?` · ${peso(o.quoted_price_php)}`:""}</option>`).join("")}</select></div>
+      <div class="grid-2">
+        <div class="field"><label>Amount paid (₱)</label><input class="input" type="number" min="0.01" step="0.01" name="amount" value="${esc(defaultAmount)}" required></div>
+        <div class="field"><label>Payment method</label><select class="input" name="method"><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option><option value="cash">Cash</option><option value="other">Other</option></select></div>
+      </div>
+      <div class="field"><label>Reference number</label><input class="input" name="reference" minlength="3" maxlength="160" required placeholder="Transaction/reference number"></div>
+      <div class="field"><label>Notes (optional)</label><textarea class="input" name="notes" maxlength="2000" placeholder="Payment date, sender name, or other useful details"></textarea></div>
+      <div class="modal-actions"><button type="button" id="close-license-payment" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Submit for review</button></div>
+    </form>`);
+  document.querySelector("#close-license-payment")?.addEventListener("click",closeModal);
+  document.querySelector("#license-payment-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const orderId=String(fd.get("order_id")||"").trim();
+    const {error}=await supabase.from("license_payment_submissions").insert({
+      shop_id:state.shop.id,
+      order_request_id:orderId||null,
+      submitted_by:state.user.id,
+      amount_php:Number(fd.get("amount")||0),
+      payment_method:String(fd.get("method")||"other"),
+      reference_number:String(fd.get("reference")||"").trim(),
+      notes:String(fd.get("notes")||"").trim()||null
+    });
+    if(error) return toast(friendlyError(error),"error");
+    closeModal();
+    toast("Payment reference submitted for MotoPOS review.","success");
+    await pageLicense(root);
+  });
 }
 
 async function openCustomLicenseRequest(root) {
@@ -2302,19 +2355,86 @@ async function pageDevices(root) {
     </tbody></table></div>`;
 }
 
+async function fetchAllShopRows(table) {
+  const rows=[];
+  let from=0;
+  const pageSize=1000;
+  while(true){
+    const {data,error}=await supabase.from(table).select("*").eq("shop_id",state.shop.id).range(from,from+pageSize-1);
+    if(error) throw error;
+    rows.push(...(data||[]));
+    if(!data || data.length<pageSize) break;
+    from+=pageSize;
+  }
+  return rows;
+}
+
+function csvCell(value){
+  if(value==null) return "";
+  const text=typeof value==="object"?JSON.stringify(value):String(value);
+  return '"' + text.replaceAll('"','""') + '"';
+}
+
+function downloadTextFile(name,text,type="text/plain;charset=utf-8"){
+  const blob=new Blob([text],{type});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),500);
+}
+
+async function exportShopCsv(table,fileName){
+  const rows=await fetchAllShopRows(table);
+  if(!rows.length) return toast("No records to export.","");
+  const keys=[...new Set(rows.flatMap(row=>Object.keys(row)))];
+  const csv=[keys.map(csvCell).join(","),...rows.map(row=>keys.map(k=>csvCell(row[k])).join(","))].join("\r\n");
+  downloadTextFile(fileName,csv,"text/csv;charset=utf-8");
+  toast(`${rows.length} record(s) exported.`,"success");
+}
+
+async function exportFullBackup(){
+  const tables=[
+    "products","product_categories","customers","motorcycles","sales","sale_items","payments",
+    "inventory_movements","quotations","quotation_items","job_orders","job_order_parts","job_order_services",
+    "suppliers","purchase_orders","purchase_order_items","expenses","warranties","appointments",
+    "service_reminders","customer_receivables","receivable_payments","license_events"
+  ];
+  const backup={format:"MotoPOS Shop Backup",version:"2.2.0",exported_at:new Date().toISOString(),shop:state.shop,data:{}};
+  for(const table of tables){
+    try{backup.data[table]=await fetchAllShopRows(table);}
+    catch(error){backup.data[table]={unavailable:friendlyError(error)};}
+  }
+  downloadTextFile(`MotoPOS-${String(state.shop.name||"Shop").replace(/[^a-z0-9]+/gi,"-")}-backup-${new Date().toISOString().slice(0,10)}.json`,JSON.stringify(backup,null,2),"application/json");
+  toast("Full MotoPOS backup exported.","success");
+}
+
 async function pageSettings(root) {
   root.innerHTML = `
-    ${head("Settings","Shop identity used across MotoPOS")}
-    <div class="card" style="max-width:720px">
-      <form id="shop-settings" class="form">
-        <div class="field"><label>Shop name</label><input class="input" name="name" value="${esc(state.shop.name||"")}" required></div>
-        <div class="grid-2">
-          <div class="field"><label>Phone</label><input class="input" name="phone" value="${esc(state.shop.phone||"")}"></div>
-          <div class="field"><label>Email</label><input class="input" type="email" name="email" value="${esc(state.shop.email||"")}"></div>
+    ${head("Settings","Shop identity, backup and export tools")}
+    <div class="grid-2">
+      <div class="card">
+        <form id="shop-settings" class="form">
+          <div class="card-title"><h3>Shop identity</h3><span>Cloud profile</span></div>
+          <div class="field"><label>Shop name</label><input class="input" name="name" value="${esc(state.shop.name||"")}" required></div>
+          <div class="grid-2">
+            <div class="field"><label>Phone</label><input class="input" name="phone" value="${esc(state.shop.phone||"")}"></div>
+            <div class="field"><label>Email</label><input class="input" type="email" name="email" value="${esc(state.shop.email||"")}"></div>
+          </div>
+          <div class="field"><label>Address</label><textarea class="input" name="address">${esc(state.shop.address||"")}</textarea></div>
+          <button class="btn btn-primary" type="submit">Save shop settings</button>
+        </form>
+      </div>
+      <div class="card">
+        <div class="card-title"><h3>Backup & Export</h3><span>Owner-controlled data portability</span></div>
+        <p class="help">Exports respect your shop access and current MotoPOS entitlements. JSON backup contains every accessible record group; CSV exports are spreadsheet-ready.</p>
+        <div class="export-grid">
+          <button class="btn btn-secondary export-data" data-table="sales" data-file="MotoPOS-sales.csv">Sales CSV</button>
+          <button class="btn btn-secondary export-data" data-table="products" data-file="MotoPOS-inventory.csv">Inventory CSV</button>
+          <button class="btn btn-secondary export-data" data-table="customers" data-file="MotoPOS-customers.csv">Customers CSV</button>
+          <button id="export-full-backup" class="btn btn-primary">Full JSON Backup</button>
         </div>
-        <div class="field"><label>Address</label><textarea class="input" name="address">${esc(state.shop.address||"")}</textarea></div>
-        <button class="btn btn-primary" type="submit">Save shop settings</button>
-      </form>
+        <div class="verify-note"><strong>Cloud safety</strong><span>Supabase also maintains platform database backups. This export is an additional shop-owned portable copy.</span></div>
+      </div>
     </div>`;
   document.querySelector("#shop-settings")?.addEventListener("submit", async event => {
     event.preventDefault();
@@ -2330,6 +2450,17 @@ async function pageSettings(root) {
     toast("Shop settings saved.","success");
     pageSettings(root);
   });
+  root.querySelectorAll(".export-data").forEach(btn=>btn.addEventListener("click",async()=>{
+    btn.disabled=true;
+    try{await exportShopCsv(btn.dataset.table,btn.dataset.file);}
+    catch(error){toast(friendlyError(error),"error");}
+    btn.disabled=false;
+  }));
+  document.querySelector("#export-full-backup")?.addEventListener("click",async event=>{
+    const btn=event.currentTarget;btn.disabled=true;btn.textContent="Preparing…";
+    try{await exportFullBackup();}catch(error){toast(friendlyError(error),"error");}
+    btn.disabled=false;btn.textContent="Full JSON Backup";
+  });
 }
 
 async function renderAdmin() {
@@ -2339,7 +2470,7 @@ async function renderAdmin() {
   }
 
   const path=currentPath();
-  const section=path==="admin/users"?"users":path==="admin/support"?"support":"clients";
+  const section=path==="admin/users"?"users":path==="admin/support"?"support":path==="admin/health"?"health":"clients";
 
   app.innerHTML = `
     <div class="app-shell">
@@ -2350,6 +2481,7 @@ async function renderAdmin() {
           <a class="nav-item ${section==="clients"?"active":""}" href="#/admin"><span>Clients & Licenses</span><span class="nav-badge">ADMIN</span></a>
           <a class="nav-item ${section==="users"?"active":""}" href="#/admin/users"><span>Users & Emails</span></a>
           <a class="nav-item ${section==="support"?"active":""}" href="#/admin/support"><span>Support Inbox</span></a>
+          <a class="nav-item ${section==="health"?"active":""}" href="#/admin/health"><span>System Health & Billing</span><span class="nav-badge">v2.2</span></a>
           <a class="nav-item" href="#/manual"><span>App Manual</span><span class="nav-badge">HELP</span></a>
           ${state.shop ? '<a class="nav-item" href="#/dashboard/overview"><span>My Shop</span></a>' : ""}
         </nav>
@@ -2367,9 +2499,92 @@ async function renderAdmin() {
 
   if(section==="users") await loadAdminUsers();
   else if(section==="support") await loadAdminSupport();
+  else if(section==="health") await loadAdminHealth();
   else await loadAdminClients();
 }
 
+
+
+async function loadAdminHealth() {
+  const root=document.querySelector("#admin-content");
+  if(!root) return;
+  const [healthRes,paymentRes]=await Promise.all([
+    supabase.rpc("admin_system_health_v2"),
+    supabase.from("license_payment_submissions")
+      .select("id,shop_id,order_request_id,amount_php,payment_method,reference_number,status,notes,admin_notes,created_at,shop:shops(name),order:license_order_requests(requested_plan,billing_cycle)")
+      .order("created_at",{ascending:false}).limit(150)
+  ]);
+  if(healthRes.error){root.innerHTML=`<div class="empty"><strong>System Health unavailable</strong>${esc(friendlyError(healthRes.error))}</div>`;return;}
+  if(paymentRes.error){root.innerHTML=`<div class="empty"><strong>Billing queue unavailable</strong>${esc(friendlyError(paymentRes.error))}</div>`;return;}
+  const h=healthRes.data||{};
+  const payments=paymentRes.data||[];
+
+  root.innerHTML=`
+    ${head("System Health & Billing","Production telemetry, attention queues and manual payment verification")}
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Users / Shops</div><div class="metric-value">${number(h.auth_users||0)} / ${number(h.shops||0)}</div><div class="metric-sub">Registered cloud accounts</div></article>
+      <article class="metric"><div class="metric-label">Licensed</div><div class="metric-value">${number((h.active_licenses||0)+(h.active_trials||0))}</div><div class="metric-sub">${number(h.active_trials||0)} trial · ${number(h.expired_or_suspended||0)} blocked</div></article>
+      <article class="metric"><div class="metric-label">Devices</div><div class="metric-value">${number(h.active_devices||0)}</div><div class="metric-sub">${number(h.outdated_devices||0)} not on ${esc(h.latest_app_version||"latest")}</div></article>
+      <article class="metric"><div class="metric-label">Support</div><div class="metric-value">${number(h.open_support||0)}</div><div class="metric-sub">${number(h.human_handoffs||0)} human handoff(s)</div></article>
+    </section>
+    <section class="metrics">
+      <article class="metric"><div class="metric-label">Pending payments</div><div class="metric-value">${number(h.pending_payments||0)}</div><div class="metric-sub">Need verification</div></article>
+      <article class="metric"><div class="metric-label">Custom orders</div><div class="metric-value">${number(h.pending_custom_orders||0)}</div><div class="metric-sub">Open quote/order queue</div></article>
+      <article class="metric"><div class="metric-label">Low stock</div><div class="metric-value">${number(h.low_stock_products||0)}</div><div class="metric-sub">Across client shops</div></article>
+      <article class="metric"><div class="metric-label">Overdue A/R</div><div class="metric-value">${number(h.overdue_receivables||0)}</div><div class="metric-sub">${number(h.service_due_7d||0)} service reminders due</div></article>
+    </section>
+
+    <div class="card">
+      <div class="card-title"><h3>License payment verification queue</h3><span>${payments.length} recent submission(s)</span></div>
+      <div class="table-wrap compact-table"><table><thead><tr><th>Shop</th><th>Payment</th><th>Reference</th><th>Order</th><th>Status</th><th>Action</th></tr></thead><tbody>
+        ${payments.map(p=>`<tr>
+          <td><strong>${esc(p.shop?.name||"Shop")}</strong><div class="help">${niceDate(p.created_at,true)}</div></td>
+          <td><strong>${peso(p.amount_php)}</strong><div class="help">${esc(String(p.payment_method||"").toUpperCase())}</div></td>
+          <td>${esc(p.reference_number)}</td>
+          <td>${esc(p.order?.requested_plan||"Renewal")}${p.order?.billing_cycle?` · ${esc(p.order.billing_cycle)}`:""}</td>
+          <td>${pill(p.status)}</td>
+          <td><button class="btn btn-secondary btn-sm review-license-payment" data-id="${p.id}">Review</button></td>
+        </tr>`).join("")||'<tr><td colspan="6">No payment submissions yet.</td></tr>'}
+      </tbody></table></div>
+    </div>
+    <div class="verify-note" style="margin-top:14px"><strong>Generated ${niceDate(h.generated_at,true)}</strong><span>System Health uses live MotoPOS database state. Supabase platform-level infrastructure logs remain in the Supabase Dashboard.</span></div>`;
+
+  root.querySelectorAll(".review-license-payment").forEach(btn=>{
+    const payment=payments.find(p=>p.id===btn.dataset.id);
+    btn.addEventListener("click",()=>openLicensePaymentReview(payment));
+  });
+}
+
+function openLicensePaymentReview(payment){
+  if(!payment) return;
+  showModal(`
+    <h2>Review license payment</h2>
+    <p><strong>${esc(payment.shop?.name||"Shop")}</strong> · ${peso(payment.amount_php)} · ${esc(String(payment.payment_method||"").toUpperCase())}</p>
+    <div class="key-box">${esc(payment.reference_number)}</div>
+    ${payment.notes?`<div class="verify-note"><strong>Client notes</strong><span>${esc(payment.notes)}</span></div>`:""}
+    <form id="license-payment-review-form" class="form">
+      <div class="field"><label>Status</label><select class="input" name="status">
+        ${["pending","verified","rejected","applied"].map(s=>`<option value="${s}" ${payment.status===s?"selected":""}>${s}</option>`).join("")}
+      </select></div>
+      <div class="field"><label>Admin notes</label><textarea class="input" name="notes" maxlength="2000">${esc(payment.admin_notes||"")}</textarea></div>
+      <div class="help">“Verified” confirms the reference. Use Clients & Licenses to issue/renew the license, then mark this payment “Applied”.</div>
+      <div class="modal-actions"><button id="close-payment-review" type="button" class="btn btn-secondary">Close</button><button type="submit" class="btn btn-primary">Save review</button></div>
+    </form>`);
+  document.querySelector("#close-payment-review")?.addEventListener("click",closeModal);
+  document.querySelector("#license-payment-review-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const {error}=await supabase.from("license_payment_submissions").update({
+      status:String(fd.get("status")||"pending"),
+      admin_notes:String(fd.get("notes")||"").trim()||null,
+      reviewed_by:state.user.id,
+      reviewed_at:new Date().toISOString(),
+      updated_at:new Date().toISOString()
+    }).eq("id",payment.id);
+    if(error) return toast(friendlyError(error),"error");
+    closeModal();toast("Payment review saved.","success");await loadAdminHealth();
+  });
+}
 
 async function loadAdminClients() {
   const root = document.querySelector("#admin-content");
