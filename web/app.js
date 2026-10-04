@@ -2264,20 +2264,40 @@ async function pageLicense(root) {
 
 function openLicensePaymentSubmission(root, orders, license) {
   const payableOrders=(orders||[]).filter(o=>["quoted","approved","reviewing","pending"].includes(o.status));
-  const defaultAmount=payableOrders.find(o=>o.quoted_price_php!=null)?.quoted_price_php ?? license?.price_snapshot_php ?? "";
+  const orderTotal=o=>{
+    const software=Number(o?.quoted_price_php||0);
+    const hardware=Number(o?.hardware_quote_php||0);
+    return software+hardware || null;
+  };
+  const firstQuoted=payableOrders.find(o=>orderTotal(o)!=null);
+  const defaultAmount=firstQuoted?orderTotal(firstQuoted):(license?.price_snapshot_php ?? "");
   showModal(`
     <h2>Submit license payment</h2>
-    <p>Submit the payment reference for manual MotoPOS verification. Never send PINs, OTPs or passwords.</p>
+    <p>Submit the payment reference for manual MotoPOS verification. For custom orders, the suggested total includes the software license plus any quoted SUNMI V2 hardware. Never send PINs, OTPs or passwords.</p>
     <form id="license-payment-form" class="form">
-      <div class="field"><label>Related custom order (optional)</label><select class="input" name="order_id"><option value="">Renewal / fixed plan</option>${payableOrders.map(o=>`<option value="${esc(o.id)}">${esc(o.requested_plan)} · ${esc(o.billing_cycle)} · ${esc(o.status)}${o.quoted_price_php!=null?` · ${peso(o.quoted_price_php)}`:""}</option>`).join("")}</select></div>
+      <div class="field"><label>Related custom order (optional)</label><select class="input" name="order_id" id="license-payment-order"><option value="">Renewal / fixed plan</option>${payableOrders.map(o=>{
+        const total=orderTotal(o);
+        const hardware=Number(o.hardware_quote_php||0);
+        return `<option value="${esc(o.id)}">${esc(o.requested_plan)} · ${esc(o.billing_cycle)} · ${esc(o.status)}${total!=null?` · Total ${peso(total)}`:""}${hardware>0?` (includes SUNMI V2 ${peso(hardware)})`:""}</option>`;
+      }).join("")}</select></div>
       <div class="grid-2">
-        <div class="field"><label>Amount paid (₱)</label><input class="input" type="number" min="0.01" step="0.01" name="amount" value="${esc(defaultAmount)}" required></div>
+        <div class="field"><label>Amount paid (₱)</label><input class="input" id="license-payment-amount" type="number" min="0.01" step="0.01" name="amount" value="${esc(defaultAmount)}" required><div class="help">Custom-order amount = software quote + hardware quote, when both are available.</div></div>
         <div class="field"><label>Payment method</label><select class="input" name="method"><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank">Bank transfer</option><option value="cash">Cash</option><option value="other">Other</option></select></div>
       </div>
       <div class="field"><label>Reference number</label><input class="input" name="reference" minlength="3" maxlength="160" required placeholder="Transaction/reference number"></div>
       <div class="field"><label>Notes (optional)</label><textarea class="input" name="notes" maxlength="2000" placeholder="Payment date, sender name, or other useful details"></textarea></div>
       <div class="modal-actions"><button type="button" id="close-license-payment" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary">Submit for review</button></div>
     </form>`);
+
+  const orderSelect=document.querySelector("#license-payment-order");
+  const amountInput=document.querySelector("#license-payment-amount");
+  if(firstQuoted && orderSelect) orderSelect.value=firstQuoted.id;
+  orderSelect?.addEventListener("change",()=>{
+    const selected=payableOrders.find(o=>o.id===orderSelect.value);
+    const suggested=selected?orderTotal(selected):Number(license?.price_snapshot_php||0);
+    if(amountInput) amountInput.value=suggested?String(suggested):"";
+  });
+
   document.querySelector("#close-license-payment")?.addEventListener("click",closeModal);
   document.querySelector("#license-payment-form")?.addEventListener("submit",async event=>{
     event.preventDefault();
