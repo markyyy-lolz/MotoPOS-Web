@@ -282,9 +282,10 @@ async function loadAccessContext() {
   const [memberRes, adminRes] = await Promise.all([
     supabase
       .from("shop_members")
-      .select("id,shop_id,role,is_active,joined_at,shop:shops(id,name,phone,email,address,currency_code,timezone)")
+      .select("id,shop_id,role,is_active,joined_at,shop:shops!inner(id,name,phone,email,address,currency_code,timezone,app_code,business_type)")
       .eq("user_id", state.user.id)
       .eq("is_active", true)
+      .eq("shop.app_code", "motopos")
       .order("joined_at", { ascending: true })
       .limit(1)
       .maybeSingle(),
@@ -832,7 +833,8 @@ async function loadPublicPlans() {
   if (!root) return;
   const { data, error } = await supabase
     .from("license_plans")
-    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
+    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order,app_code")
+    .eq("app_code","motopos")
     .eq("is_active", true)
     .order("sort_order");
 
@@ -1834,7 +1836,7 @@ async function pageOperations(root) {
 async function pageBranches(root) {
   const [memberRes,groupRes,transferRes] = await Promise.all([
     supabase.from("shop_members")
-      .select("shop_id,role,is_active,shop:shops(id,name,address,phone)")
+      .select("shop_id,role,is_active,shop:shops(id,name,address,phone,app_code,business_type)")
       .eq("user_id",state.user.id).eq("is_active",true),
     supabase.from("shop_groups")
       .select("id,name,created_at,shops:shop_group_shops(shop_id,shop:shops(id,name,address))")
@@ -1848,7 +1850,7 @@ async function pageBranches(root) {
   if(groupRes.error) throw groupRes.error;
   if(transferRes.error) throw transferRes.error;
 
-  const memberships=(memberRes.data||[]).filter(m=>m.shop);
+  const memberships=(memberRes.data||[]).filter(m=>m.shop?.app_code==="motopos");
   const branches=memberships.map(m=>({...m.shop,role:m.role}));
   const groups=groupRes.data||[];
   const transfers=transferRes.data||[];
@@ -2347,7 +2349,8 @@ function openLicensePaymentSubmission(root, orders, license) {
 
 async function openCustomLicenseRequest(root) {
   const {data:plans,error}=await supabase.from("license_plans")
-    .select("code,name,default_max_devices,default_max_staff,features,sort_order")
+    .select("code,name,default_max_devices,default_max_staff,features,sort_order,app_code")
+    .eq("app_code","motopos")
     .eq("is_active",true).order("sort_order");
   if(error||!plans?.length) return toast(friendlyError(error||new Error("No active plans found.")),"error");
 
@@ -2918,7 +2921,8 @@ async function loadAdminSupport() {
 async function openLicenseModal(shopId, shopName, order = null) {
   const { data: plans, error } = await supabase
     .from("license_plans")
-    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order")
+    .select("code,name,description,default_max_devices,default_max_staff,default_offline_grace_days,monthly_price_php,annual_price_php,marketing_note,features,sort_order,app_code")
+    .eq("app_code","motopos")
     .eq("is_active",true)
     .order("sort_order");
 
