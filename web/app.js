@@ -2,7 +2,8 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 
 const SUPABASE_URL = "https://qgyzdoltjlryjthxxscw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_mCjtfE-W75s1yyUdw2NY2g_z6ic5DIc";
-const EMAIL_CONFIRM_REDIRECT = "https://markyyy-lolz.github.io/MotoPOS-Web/?email-confirmed=1";
+const EMAIL_CONFIRM_GATE = "https://markyyy-lolz.github.io/MotoPOS-Web/#/confirm-email";
+const EMAIL_CONFIRM_SUCCESS = "https://markyyy-lolz.github.io/MotoPOS-Web/?email-confirmed=1";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -363,7 +364,7 @@ function renderEmailConfirmationGate() {
     const verifyUrl = new URL(SUPABASE_URL + "/auth/v1/verify");
     verifyUrl.searchParams.set("token", token);
     verifyUrl.searchParams.set("type", "email");
-    verifyUrl.searchParams.set("redirect_to", EMAIL_CONFIRM_REDIRECT);
+    verifyUrl.searchParams.set("redirect_to", EMAIL_CONFIRM_SUCCESS);
     window.location.assign(verifyUrl.toString());
   });
 }
@@ -965,7 +966,7 @@ async function resendConfirmation() {
     const { error } = await supabase.auth.resend({
       type: "signup",
       email,
-      options: { emailRedirectTo: EMAIL_CONFIRM_REDIRECT }
+      options: { emailRedirectTo: EMAIL_CONFIRM_GATE }
     });
     if (error) throw error;
     toast("Verification email requested. Check Inbox and Spam/Junk.", "success");
@@ -999,7 +1000,7 @@ async function handleAuth(event) {
         password,
         options: {
           data: { display_name: displayName },
-          emailRedirectTo: EMAIL_CONFIRM_REDIRECT
+          emailRedirectTo: EMAIL_CONFIRM_GATE
         }
       });
       if (error) throw error;
