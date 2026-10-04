@@ -2130,9 +2130,10 @@ async function renderSupportChatPanel(panel, threadId, adminMode) {
 
 
 
+
 async function pageLicense(root) {
   const canManageLicense = ["owner","admin","manager"].includes(state.membership?.role);
-  const [licenseRes, deviceRes, memberRes, historyRes, ordersRes] = await Promise.all([
+  const [licenseRes, deviceRes, memberRes, historyRes, ordersRes, paymentRes] = await Promise.all([
     supabase.from("shop_licenses")
       .select("id,plan_code,status,license_key_last4,starts_at,expires_at,max_devices,max_staff,offline_grace_days,billing_cycle,price_snapshot_php,feature_overrides,custom_label")
       .eq("shop_id",state.shop.id).maybeSingle(),
@@ -2149,12 +2150,17 @@ async function pageLicense(root) {
       ? supabase.from("license_order_requests")
           .select("id,status,requested_plan,billing_cycle,desired_devices,desired_staff,desired_features,budget_php,notes,quoted_price_php,admin_notes,created_at,updated_at")
           .eq("shop_id",state.shop.id).order("created_at",{ascending:false}).limit(8)
+      : Promise.resolve({data:[],error:null}),
+    canManageLicense
+      ? supabase.from("license_payment_submissions")
+          .select("id,order_request_id,method,reference_number,amount_php,status,admin_notes,created_at,verified_at")
+          .eq("shop_id",state.shop.id).order("created_at",{ascending:false})
       : Promise.resolve({data:[],error:null})
   ]);
-  if (licenseRes.error) throw licenseRes.error;
-  if (deviceRes.error) throw deviceRes.error;
-  if (historyRes.error) throw historyRes.error;
-  if (ordersRes.error) throw ordersRes.error;
+
+  for(const response of [licenseRes,deviceRes,memberRes,historyRes,ordersRes,paymentRes]){
+    if(response?.error) throw response.error;
+  }
 
   const license = licenseRes.data;
   const ent = state.entitlements || {};
@@ -2162,6 +2168,7 @@ async function pageLicense(root) {
   const staffCount = memberRes.data?.length || 0;
   const history = historyRes.data || [];
   const orders = ordersRes.data || [];
+  const payments = paymentRes.data || [];
   const features = entitlementFeatures();
   const trial = license?.status === "trial" ? trialRemaining(license.expires_at) : null;
   const effectiveStatus = ent.status || (
@@ -2175,70 +2182,54 @@ async function pageLicense(root) {
     : `${cycleLabel}${license?.price_snapshot_php != null ? ` · ${peso(license.price_snapshot_php)}` : ""}`;
 
   root.innerHTML = `
-    ${head("License","MotoPOS plan, entitlements, limits and custom-order requests",canManageLicense?'<button id="request-custom-license" class="btn btn-primary">Request custom plan</button>':"")}
+    ${head("License","MotoPOS plan, entitlements, custom orders and payment confirmation",canManageLicense?'<button id="request-custom-license" class="btn btn-primary">Request custom plan</button>':"")}
     ${license ? `
       ${license.status === "trial" ? `
         <div class="card" style="margin-bottom:14px;border-color:rgba(59,130,246,.28)">
           <div class="card-title"><h3>7-day Pro Trial</h3>${pill(effectiveStatus)}</div>
-          <div class="help">
-            ${trial?.days > 0
-              ? `Your full MotoPOS Pro trial is active. <strong style="color:var(--text)">${esc(trial.label)}</strong>. No license key is required during the trial.`
-              : "Your MotoPOS trial has expired. Choose a paid plan or request a custom build."}
-          </div>
+          <div class="help">${trial?.days > 0 ? `Your full MotoPOS Pro trial is active. <strong style="color:var(--text)">${esc(trial.label)}</strong>.` : "Your MotoPOS trial has expired. Choose a paid plan or request a custom build."}</div>
         </div>
       ` : ""}
       <section class="metrics">
-        <article class="metric">
-          <div class="metric-label">Plan</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.custom_label || license.plan_code || "—")}</div>
-          <div class="metric-sub">${esc(billing)}</div>
-        </article>
-        <article class="metric">
-          <div class="metric-label">Status</div>
-          <div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus || "unknown")}</div>
-          <div class="metric-sub">${license.expires_at ? `Expires · ${niceDate(license.expires_at)}` : "No expiration set"}</div>
-        </article>
+        <article class="metric"><div class="metric-label">Plan</div><div class="metric-value" style="text-transform:capitalize">${esc(ent.plan_name || license.custom_label || license.plan_code || "—")}</div><div class="metric-sub">${esc(billing)}</div></article>
+        <article class="metric"><div class="metric-label">Status</div><div class="metric-value" style="text-transform:capitalize">${esc(effectiveStatus || "unknown")}</div><div class="metric-sub">${license.expires_at ? `Expires · ${niceDate(license.expires_at)}` : "No expiration set"}</div></article>
         <article class="metric"><div class="metric-label">Devices</div><div class="metric-value">${devices.length}/${license.max_devices}</div><div class="metric-sub">Active registered devices</div></article>
         <article class="metric"><div class="metric-label">Staff</div><div class="metric-value">${staffCount}/${license.max_staff}</div><div class="metric-sub">${license.offline_grace_days}-day offline grace</div></article>
       </section>
-
       <div class="card">
         <div class="card-title"><h3>Included in your plan</h3><span class="pill blue">${features.length} entitlements</span></div>
-        <div class="entitlement-grid">
-          ${features.length
-            ? features.map(feature => `<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join("")
-            : '<span class="help">Licensed modules are unavailable until the plan is active.</span>'}
-        </div>
+        <div class="entitlement-grid">${features.length?features.map(feature=>`<span class="entitlement-chip">✓ ${esc(featureLabel(feature))}</span>`).join(""):'<span class="help">Licensed modules are unavailable until the plan is active.</span>'}</div>
       </div>
-    ` : `
-      <div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>
-    `}
+    ` : '<div class="empty"><strong>Preparing your free trial</strong>A new shop without a paid license automatically receives a 7-day MotoPOS Pro trial.</div>'}
 
     ${canManageLicense ? `
       <div class="card custom-license-card" style="margin-top:14px">
-        <div class="card-title"><div><h3>Custom License Orders</h3><span>Build a plan around your shop instead of forcing fixed limits.</span></div><button id="request-custom-license-card" class="btn btn-secondary btn-sm">New custom order</button></div>
+        <div class="card-title"><div><h3>Custom License Orders</h3><span>Request → quote → payment reference → verification → license issue</span></div><button id="request-custom-license-card" class="btn btn-secondary btn-sm">New custom order</button></div>
         <div class="custom-order-list">
-          ${orders.length ? orders.map(order=>`
-            <div class="custom-order-row">
-              <div><strong>${esc(order.requested_plan)} · ${esc(order.billing_cycle)}</strong><span>${number(order.desired_devices)} devices · ${number(order.desired_staff)} staff · ${Array.isArray(order.desired_features)?order.desired_features.length:0} modules</span></div>
-              <div><strong>${order.quoted_price_php!=null?peso(order.quoted_price_php):order.budget_php!=null?`Budget ${peso(order.budget_php)}`:"Awaiting quote"}</strong><span>${pill(order.status)} · ${niceDate(order.created_at,true)}</span></div>
-            </div>
-          `).join(""):'<div class="help">No custom orders yet. Request a tailored combination of modules, devices, staff limits and billing term.</div>'}
+          ${orders.length ? orders.map(order=>{
+            const payment=payments.find(p=>p.order_request_id===order.id);
+            const canPay=["quoted","approved"].includes(order.status) && !["pending","verified"].includes(payment?.status);
+            return `
+              <div class="custom-order-row">
+                <div>
+                  <strong>${esc(order.requested_plan)} · ${esc(order.billing_cycle)}</strong>
+                  <span>${number(order.desired_devices)} devices · ${number(order.desired_staff)} staff · ${Array.isArray(order.desired_features)?order.desired_features.length:0} modules</span>
+                  ${payment?`<span>Payment: ${esc(payment.method.replaceAll("_"," "))} · ${esc(payment.reference_number)} · ${pill(payment.status)}</span>`:""}
+                </div>
+                <div>
+                  <strong>${order.quoted_price_php!=null?peso(order.quoted_price_php):order.budget_php!=null?`Budget ${peso(order.budget_php)}`:"Awaiting quote"}</strong>
+                  <span>${pill(order.status)} · ${niceDate(order.created_at,true)}</span>
+                  ${canPay?`<button class="btn btn-primary btn-sm submit-license-payment" data-order="${order.id}">Submit payment reference</button>`:""}
+                </div>
+              </div>`;
+          }).join(""):'<div class="help">No custom orders yet. Request a tailored combination of modules, devices, staff limits and billing term.</div>'}
         </div>
       </div>
 
       <div class="card" style="margin-top:14px">
         <div class="card-title"><h3>License history</h3><span class="help">Latest ${history.length} event(s)</span></div>
         <div class="stat-list">
-          ${history.length ? history.map(event => `
-            <div class="stat-row">
-              <span>
-                <strong>${esc(String(event.event_type || "license").replace("license.","").replaceAll("_"," "))}</strong>
-                <small>${niceDate(event.created_at,true)}</small>
-              </span>
-              <strong>${esc(event.plan_code || "—")} · ${esc(event.billing_cycle || "—")}${event.amount_php != null ? ` · ${peso(event.amount_php)}` : ""}</strong>
-            </div>
-          `).join("") : '<div class="help">No paid license events yet.</div>'}
+          ${history.length ? history.map(event=>`<div class="stat-row"><span><strong>${esc(String(event.event_type||"license").replace("license.","").replaceAll("_"," "))}</strong><small>${niceDate(event.created_at,true)}</small></span><strong>${esc(event.plan_code||"—")} · ${esc(event.billing_cycle||"—")}${event.amount_php!=null?` · ${peso(event.amount_php)}`:""}</strong></div>`).join(""):'<div class="help">No paid license events yet.</div>'}
         </div>
       </div>
     ` : ""}
@@ -2247,7 +2238,46 @@ async function pageLicense(root) {
   const openRequest=()=>openCustomLicenseRequest(root);
   document.querySelector("#request-custom-license")?.addEventListener("click",openRequest);
   document.querySelector("#request-custom-license-card")?.addEventListener("click",openRequest);
+  root.querySelectorAll(".submit-license-payment").forEach(btn=>{
+    const order=orders.find(o=>o.id===btn.dataset.order);
+    btn.addEventListener("click",()=>openLicensePaymentDialog(order,root));
+  });
 }
+
+function openLicensePaymentDialog(order,root){
+  if(!order) return;
+  showModal(`
+    <h2>Submit payment reference</h2>
+    <p>MotoPOS does not automatically charge you. Submit the reference from your agreed payment method so a system administrator can verify it.</p>
+    <form id="license-payment-form" class="form">
+      <div class="grid-2">
+        <div class="field"><label>Payment method</label><select class="input" name="method"><option value="gcash">GCash</option><option value="maya">Maya</option><option value="bank_transfer">Bank transfer</option><option value="cash">Cash</option><option value="other">Other</option></select></div>
+        <div class="field"><label>Amount paid (₱)</label><input class="input" type="number" min="0.01" step="0.01" name="amount" value="${esc(order.quoted_price_php??"")}" required></div>
+      </div>
+      <div class="field"><label>Reference / transaction number</label><input class="input" name="reference" minlength="2" maxlength="160" required></div>
+      <div class="field"><label>Notes (optional)</label><textarea class="input" name="notes" maxlength="1000"></textarea></div>
+      <div class="modal-actions"><button type="button" id="close-license-payment" class="btn btn-secondary">Cancel</button><button class="btn btn-primary" type="submit">Submit for verification</button></div>
+    </form>`);
+  document.querySelector("#close-license-payment")?.addEventListener("click",closeModal);
+  document.querySelector("#license-payment-form")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const fd=new FormData(event.currentTarget);
+    const {error}=await supabase.from("license_payment_submissions").insert({
+      order_request_id:order.id,
+      shop_id:state.shop.id,
+      submitted_by:state.user.id,
+      method:String(fd.get("method")),
+      reference_number:String(fd.get("reference")||"").trim(),
+      amount_php:Number(fd.get("amount")||0),
+      notes:String(fd.get("notes")||"").trim()||null
+    });
+    if(error) return toast(friendlyError(error),"error");
+    closeModal();
+    toast("Payment reference submitted for verification.","success");
+    await pageLicense(root);
+  });
+}
+
 
 async function openCustomLicenseRequest(root) {
   const {data:plans,error}=await supabase.from("license_plans")
