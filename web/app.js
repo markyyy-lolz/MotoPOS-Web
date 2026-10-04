@@ -844,7 +844,25 @@ async function loadPublicPlans() {
         <a class="btn ${plan.code === "pro" ? "btn-primary" : "btn-secondary"}" href="#/login?mode=signup">Start free trial</a>
       </article>
     `;
-  }).join("");
+  }).join("") + `
+    <article class="price-card">
+      <span class="kicker">custom</span>
+      <h3>Custom MotoPOS</h3>
+      <div class="plan-price"><strong>₱699</strong><span>/month starting</span></div>
+      <div class="plan-annual">Tailored quotation</div>
+      <p>Build a MotoPOS package around your actual shop requirements instead of fixed limits.</p>
+      <div class="plan-note">Final pricing depends on devices, staff accounts, selected modules, branches and support requirements.</div>
+      <div class="price-meta"><strong>Optional</strong> SUNMI V2 hardware</div>
+      <div class="plan-feature-list">
+        <span>✓ Custom device and staff limits</span>
+        <span>✓ Select only the modules you need</span>
+        <span>✓ Multi-branch and support options</span>
+        <span>✓ SUNMI V2 units can be added to the order</span>
+        <span>✓ Hardware is quoted separately from software</span>
+      </div>
+      <div class="trial-copy">Create your shop first, then submit a Custom License Order from MotoPOS Cloud.</div>
+      <a class="btn btn-secondary" href="#/login?mode=signup">Create account</a>
+    </article>`;
   setupMotion(root);
 }
 function renderAuth() {
