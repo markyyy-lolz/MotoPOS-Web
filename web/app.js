@@ -2329,9 +2329,55 @@ async function pageDevices(root) {
     </tbody></table></div>`;
 }
 
+
+function csvCell(value){
+  const text=value==null?"":typeof value==="object"?JSON.stringify(value):String(value);
+  return '"' + text.replaceAll('"','""') + '"';
+}
+
+function downloadClientFile(filename,content,type="text/plain;charset=utf-8"){
+  const blob=new Blob([content],{type});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+async function exportShopTable(table,filename){
+  const {data,error}=await supabase.from(table).select("*").eq("shop_id",state.shop.id);
+  if(error) return toast(friendlyError(error),"error");
+  const rows=data||[];
+  if(!rows.length) return toast("No data to export.","");
+  const keys=Object.keys(rows[0]);
+  const csv=[keys.map(csvCell).join(","),...rows.map(row=>keys.map(k=>csvCell(row[k])).join(","))].join("\\n");
+  downloadClientFile(filename,csv,"text/csv;charset=utf-8");
+  toast("CSV export created.","success");
+}
+
+async function exportShopBackup(){
+  const sources=["products","customers","sales","sale_items","payments","job_orders","quotations","expenses"];
+  const backup={
+    version:"MotoPOS 2.2.0",
+    exported_at:new Date().toISOString(),
+    shop:{id:state.shop.id,name:state.shop.name},
+    tables:{}
+  };
+  for(const table of sources){
+    const {data,error}=await supabase.from(table).select("*").eq("shop_id",state.shop.id);
+    backup.tables[table]=error?{error:friendlyError(error)}:(data||[]);
+  }
+  const safe=String(state.shop.name||"shop").replace(/[^a-z0-9]+/gi,"-").replace(/^-|-$/g,"")||"shop";
+  downloadClientFile(`MotoPOS-${safe}-backup.json`,JSON.stringify(backup,null,2),"application/json");
+  toast("JSON backup exported.","success");
+}
+
 async function pageSettings(root) {
   root.innerHTML = `
-    ${head("Settings","Shop identity used across MotoPOS")}
+    ${head("Settings","Shop identity, exports and data portability")}
     <div class="card" style="max-width:720px">
       <form id="shop-settings" class="form">
         <div class="field"><label>Shop name</label><input class="input" name="name" value="${esc(state.shop.name||"")}" required></div>
@@ -2342,15 +2388,33 @@ async function pageSettings(root) {
         <div class="field"><label>Address</label><textarea class="input" name="address">${esc(state.shop.address||"")}</textarea></div>
         <button class="btn btn-primary" type="submit">Save shop settings</button>
       </form>
+    </div>
+
+    <div class="card" style="max-width:720px;margin-top:14px">
+      <div class="card-title"><h3>Export & Backup</h3><span>Portable copies of shop-owned data</span></div>
+      <p class="help">CSV exports are useful for spreadsheets. Full JSON Backup keeps a broader technical snapshot for recovery/reference.</p>
+      <div class="actions">
+        <button id="export-products" class="btn btn-secondary">Products CSV</button>
+        <button id="export-customers" class="btn btn-secondary">Customers CSV</button>
+        <button id="export-sales" class="btn btn-secondary">Sales CSV</button>
+        <button id="export-backup" class="btn btn-primary">Full JSON Backup</button>
+      </div>
+      <div class="verify-note"><strong>Privacy</strong><span>Exports may contain customer and transaction information. Store downloaded files securely.</span></div>
     </div>`;
+
+  document.querySelector("#export-products")?.addEventListener("click",()=>exportShopTable("products","MotoPOS-products.csv"));
+  document.querySelector("#export-customers")?.addEventListener("click",()=>exportShopTable("customers","MotoPOS-customers.csv"));
+  document.querySelector("#export-sales")?.addEventListener("click",()=>exportShopTable("sales","MotoPOS-sales.csv"));
+  document.querySelector("#export-backup")?.addEventListener("click",exportShopBackup);
+
   document.querySelector("#shop-settings")?.addEventListener("submit", async event => {
     event.preventDefault();
-    const f = new FormData(event.currentTarget);
+    const form = new FormData(event.currentTarget);
     const { data, error } = await supabase.from("shops").update({
-      name:String(f.get("name")||"").trim(),
-      phone:String(f.get("phone")||"").trim()||null,
-      email:String(f.get("email")||"").trim()||null,
-      address:String(f.get("address")||"").trim()||null
+      name:String(form.get("name")||"").trim(),
+      phone:String(form.get("phone")||"").trim()||null,
+      email:String(form.get("email")||"").trim()||null,
+      address:String(form.get("address")||"").trim()||null
     }).eq("id",state.shop.id).select("id,name,phone,email,address,currency_code,timezone").single();
     if (error) return toast(friendlyError(error),"error");
     state.shop = data;
@@ -2358,6 +2422,7 @@ async function pageSettings(root) {
     pageSettings(root);
   });
 }
+
 
 async function renderAdmin() {
   if (!state.isSystemAdmin) {
